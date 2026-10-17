@@ -20,7 +20,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
 };
 use terminal_input::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind},
@@ -30,7 +30,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::picker::{
     api::Herdr,
-    app::{Action, App, ResultHit, is_backdrop_click},
+    app::{Action, App, ResultHit},
     config::SearchMode,
     model::{Snapshot, Target},
     search::{Row, RowKind},
@@ -93,9 +93,9 @@ fn wait_for_snapshot(
             }
             Err(TryRecvError::Empty) => {}
         }
-        let mut loading = LoadingAreas::default();
+        let mut cancel_area = Rect::default();
         terminal.draw(|frame| {
-            loading = render_loading(frame, theme.palette());
+            cancel_area = render_loading(frame, theme.palette());
         })?;
         if event::poll(Duration::from_millis(20))? {
             let event = event::read()?;
@@ -108,9 +108,8 @@ fn wait_for_snapshot(
                 return Ok(None);
             }
             if let Event::Mouse(mouse) = event
-                && (is_backdrop_click(Some(loading.picker), mouse)
-                    || (mouse.kind == MouseEventKind::Down(MouseButton::Left)
-                        && loading.cancel.contains((mouse.column, mouse.row).into())))
+                && mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                && cancel_area.contains((mouse.column, mouse.row).into())
             {
                 return Ok(None);
             }
@@ -417,13 +416,7 @@ fn render_result(frame: &mut Frame<'_>, app: &App, index: usize, area: Rect) -> 
 }
 
 pub fn render(frame: &mut Frame<'_>, app: &mut App) {
-    let (picker, content) = render_panel(frame, app.theme.palette());
-    render_content(frame, app, content);
-    app.picker_area = Some(picker);
-}
-
-/// Render picker contents within an explicit area; hit targets use frame coordinates.
-pub fn render_content(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
+    let area = frame.area();
     let palette = app.theme.palette();
     frame.render_widget(Paragraph::new("").style(palette.base_style()), area);
     app.ok_area = Rect::default();
@@ -557,63 +550,25 @@ fn render_actions(
     (ok, cancel)
 }
 
-#[derive(Default)]
-pub struct LoadingAreas {
-    pub picker: Rect,
-    pub cancel: Rect,
-}
-
-fn render_panel(frame: &mut Frame<'_>, palette: Palette) -> (Rect, Rect) {
-    let available = frame.area();
-    frame.render_widget(
-        Paragraph::new("").style(palette.base_style().bg(palette.sidebar_bg)),
-        available,
-    );
-    if available.width < 10 || available.height < 8 {
-        return (available, available);
-    }
-    let width = ((u32::from(available.width) * 80 / 100) as u16)
-        .max(10)
-        .min(available.width);
-    let height = available.height.min(22);
-    let picker = Rect::new(
-        available.x + (available.width - width) / 2,
-        available.y + (available.height - height) / 2,
-        width,
-        height,
-    );
-    let border = Block::default()
-        .borders(Borders::ALL)
-        .title(" Workspaces and tabs ")
-        .border_style(palette.base_style().fg(palette.accent));
-    let content = border.inner(picker);
-    frame.render_widget(border, picker);
-    (picker, content)
-}
-
-pub fn render_loading(frame: &mut Frame<'_>, palette: Palette) -> LoadingAreas {
-    let (picker, area) = render_panel(frame, palette);
+pub fn render_loading(frame: &mut Frame<'_>, palette: Palette) -> Rect {
+    let area = frame.area();
     frame.render_widget(Paragraph::new("").style(palette.base_style()), area);
     if area.width < 8 || area.height < 6 {
         frame.render_widget(
             Paragraph::new("Esc closes").style(palette.base_style()),
             area,
         );
-        return LoadingAreas {
-            picker,
-            cancel: Rect::default(),
-        };
+        return Rect::default();
     }
     frame.render_widget(
         Paragraph::new("Loading workspaces, worktrees and tabs…").style(palette.base_style()),
         Rect::new(area.x, area.y, area.width, area.height - 2),
     );
-    let cancel = render_actions(
+    render_actions(
         frame,
         Rect::new(area.x, area.bottom() - 1, area.width, 1),
         palette,
         false,
     )
-    .1;
-    LoadingAreas { picker, cancel }
+    .1
 }

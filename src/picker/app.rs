@@ -37,7 +37,6 @@ pub struct App {
     pub mode: SearchMode,
     pub ok_area: Rect,
     pub cancel_area: Rect,
-    pub picker_area: Option<Rect>,
     pub theme: Theme,
     search: Search,
 }
@@ -61,7 +60,6 @@ impl App {
             results_area: Rect::default(),
             ok_area: Rect::default(),
             cancel_area: Rect::default(),
-            picker_area: None,
             theme: Theme::default(),
             mode,
             search,
@@ -140,10 +138,6 @@ impl App {
                 self.results_area = Rect::default();
                 self.ok_area = Rect::default();
                 self.cancel_area = Rect::default();
-                self.picker_area = None;
-            }
-            Event::Mouse(mouse) if is_backdrop_click(self.picker_area, mouse) => {
-                return Action::Close;
             }
             Event::Mouse(mouse)
                 if mouse.kind == MouseEventKind::Down(MouseButton::Left)
@@ -224,12 +218,4 @@ impl App {
         }
         Action::Continue
     }
-}
-
-pub(crate) fn is_backdrop_click(
-    area: Option<Rect>,
-    mouse: terminal_input::event::MouseEvent,
-) -> bool {
-    mouse.kind == MouseEventKind::Down(MouseButton::Left)
-        && area.is_some_and(|area| !area.contains((mouse.column, mouse.row).into()))
 }
