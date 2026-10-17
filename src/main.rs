@@ -21,7 +21,7 @@ fn execute(action: &str) -> Result<()> {
         }
         "--help" | "-h" => {
             println!(
-                "herdr++ {}\n\ncommands   Open command palette\nopen       Search workspaces, worktrees and tabs\ncheck      Validate workspace discovery without changing focus\nstart      Start one background PR watcher per Herdr session\nrefresh    Refresh workspace PR metadata once\nstop       Request watcher shutdown\ncheck-pr   Read PR associations without reporting metadata\nconfigure  Apply pending viewing config setup once\npick       Internal popup entrypoint\npick-command Internal command palette entrypoint\nwatch      Internal watcher entrypoint\n\nPR commands require git and authenticated gh; picker commands do not.\nconfigure honors HERDR_CONFIG_PATH and records setup outside config.",
+                "herdr++ {}\n\ncommands   Open command palette\nopen       Search workspaces, worktrees and tabs\nlaunch     Launch Herdr with machines in workspace picker (Ctrl+])\n           [--machine PROFILE_ID] [--session LOCAL_SESSION]\ncheck      Validate workspace discovery without changing focus\nstart      Start one background PR watcher per Herdr session\nrefresh    Refresh workspace PR metadata once\nstop       Request watcher shutdown\ncheck-pr   Read PR associations without reporting metadata\nconfigure  Apply pending viewing config setup once\npick       Internal popup entrypoint\npick-command Internal command palette entrypoint\nwatch      Internal watcher entrypoint\n\nPR commands require git and authenticated gh; picker commands do not.\nconfigure honors HERDR_CONFIG_PATH and records setup outside config.",
                 env!("CARGO_PKG_VERSION")
             );
             Ok(())
@@ -33,11 +33,13 @@ fn execute(action: &str) -> Result<()> {
 fn main() {
     let mut args = std::env::args().skip(1);
     let action = args.next().unwrap_or_else(|| "--help".into());
-    let valid_arguments = args.next().is_none();
-    let result = if !valid_arguments {
-        Err(anyhow::anyhow!("expected a single command; use --help"))
-    } else {
-        execute(&action)
+    let remaining: Vec<_> = args.collect();
+    let valid_arguments = remaining.is_empty();
+    let result = match action.as_str() {
+        "launch" => herdrpp::machines::launch::run(&remaining),
+        "machine-picker" => herdrpp::machines::launch::picker(&remaining),
+        _ if valid_arguments => execute(&action),
+        _ => Err(anyhow::anyhow!("expected a single command; use --help")),
     };
     if let Err(error) = result {
         let message = format!("{error:#}");

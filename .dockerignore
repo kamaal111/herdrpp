@@ -8,3 +8,5 @@ tests/snapshots/*
 !pyproject.toml
 !uv.lock
 !.python-version
+!tests/machines/
+!tests/machines/**

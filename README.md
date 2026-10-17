@@ -21,7 +21,9 @@ curl -fsSL https://raw.githubusercontent.com/kamaal111/herdrpp/main/install.sh |
 
 The installer installs the latest stable release at its exact tag, initializes
 PR sidebar tokens and available Cmd+P and Cmd+Shift+K shortcuts, and requests watcher startup
-when a session is running. Authenticate `gh` on the server with `gh auth login`.
+when a session is running. It also installs a persistent local `herdrpp` binary
+at `${XDG_BIN_HOME:-$HOME/.local/bin}/herdrpp`. Add that directory to your PATH.
+Authenticate `gh` on the server with `gh auth login`.
 Then select **Reload config** in the viewing client's menu. If either shortcut is already
 bound, setup preserves it and reports how to add another shortcut.
 
@@ -45,11 +47,13 @@ curl -fsSL https://raw.githubusercontent.com/kamaal111/herdrpp/main/install.sh |
 ```
 
 Config-only mode requires curl, Python 3, tar, and Rust/Cargo. It builds the
-configuration helper in a temporary directory and removes it afterward. It
-needs no Herdr server, `gh`, or GitHub authentication. Windows viewing clients
-can use the manual configuration below.
+launcher in a temporary directory, copies the executable to
+`${XDG_BIN_HOME:-$HOME/.local/bin}/herdrpp`, and removes build files afterward.
+It needs no running Herdr server, `gh`, or GitHub authentication. Windows
+viewing clients can use the manual configuration below.
 
-The installer honors `HERDR_BIN_PATH`, `HERDR_CONFIG_PATH`, and `XDG_STATE_HOME`.
+The installer honors `HERDR_BIN_PATH`, `HERDR_CONFIG_PATH`, `XDG_STATE_HOME`,
+and `XDG_BIN_HOME`. Plugin-only mode leaves the local launcher untouched.
 Use `bash install.sh --help` or `bash install.sh --dry-run` in a checkout to
 inspect it without changing your installation.
 
@@ -201,6 +205,65 @@ Setup version 2 adds only the Cmd+Shift+K binding to installations that already
 completed version 1. It preserves removed sidebar tokens and Cmd+P bindings.
 Subsequent installs do not restore a deliberately removed palette shortcut.
 Existing conflicting shortcuts are preserved and reported for manual setup.
+## Machine search
+
+The launcher is verified with Herdr **0.9.5** on macOS and Linux. Start Herdr
+through it on the viewing computer:
+
+```sh
+herdrpp launch --session default
+# Or start at an existing enabled machine profile:
+herdrpp launch --machine PROFILE_ID --session default
+```
+
+To try this branch from its checkout on the viewing computer:
+
+```sh
+just plugin-link
+./target/release/herdrpp launch
+```
+
+`plugin-link` already builds release. Start the launcher from a local terminal;
+linking the plugin alone does not enable machine switching in a normally started
+Herdr client. No Herdr source changes or additional viewing config edits are
+required.
+
+Open the workspace picker with its configured shortcut (default **Cmd+P**)
+or **Ctrl+]**. Inside that same picker, **PageUp/PageDown** or the header arrows
+cycle through Local and enabled saved machines. The header identifies the
+machine, session, and profile. Search and workspace/tab navigation apply to the
+machine being browsed; search text is retained when cycling. Browsing is read-only:
+**Enter** attaches and focuses the selected workspace or tab, while **Esc** leaves
+the original attachment unchanged. Loading, empty, and unavailable machines cannot
+be activated. Failed selections reopen the picker with an error; failed-destination
+typeahead is discarded. **Ctrl+\** exits the launcher without stopping servers.
+
+The picker runs on the viewing computer; remote machines do not need this plugin
+installed for machine browsing. The ordinary `herdrpp.open` server-side popup
+outside the launcher remains scoped to its attached server. The launcher recognizes
+its configured picker keyboard shortcut locally; invoking a plugin action through
+a separate CLI process does not address the launcher.
+
+Run `herdr machine list --json` to inspect profile IDs. The local session passed
+to the launcher is retained; each remote profile supplies its own SSH target and
+session. Profile IDs identify destinations even when display names or workspace
+IDs overlap. A profile changed during browsing must be selected again.
+
+This alternative changes machines by detaching the owned viewing client and
+starting another Herdr attachment. Server sessions and busy panes continue
+running. A failed preflight keeps the current attachment; if a replacement
+exits with an error, the launcher attempts to reattach the prior destination.
+Typing queued for a failed switch is discarded before input resumes on the
+prior attachment. It never stops Herdr servers. Each owned viewing client
+displays one endpoint;
+use this picker for machine changes. Native GoTo continues to navigate the
+current server's workspaces. Manage saved profiles with the regular
+`herdr machine` CLI outside the launcher. The launcher leaves the global catalog
+and remembered native machine selection unchanged. Adding profiles through the
+owned client's native Machines UI is unsupported and stops the launcher with a
+preserved recovery directory. Native sidebar preferences are reconciled with
+your normal viewing preferences; conflicting edits are preserved and reported.
+The standalone workspace picker retains its existing server-local scope.
 
 ## Pull request status
 
@@ -241,6 +304,11 @@ not a crash supervisor. Collapsed/mobile layouts are controlled by Herdr.
 - **Closed destination:** the picker exits and attempts original-focus
   restoration. Reopen for fresh results. Errors reach stderr and Herdr
   notifications, subject to Herdr's `[ui.toast]` settings.
+- **Machine connection:** inspect `herdr machine status PROFILE_ID --json`.
+  Run `herdr machine reconnect PROFILE_ID` outside the launcher when SSH needs
+  authentication. Failed checks retain the current viewing attachment.
+- **Local launcher missing:** add `${XDG_BIN_HOME:-$HOME/.local/bin}` to PATH,
+  or invoke its `herdrpp` executable directly with `launch`.
 - **PR missing:** verify the viewing client's tokens, reload config, and expand
   repository groups. Inspect `herdr workspace get WORKSPACE_ID` on the server;
   populated metadata indicates a client layout issue.

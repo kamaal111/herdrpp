@@ -1,5 +1,6 @@
 pub mod command;
 pub mod configure;
+pub mod machines;
 pub mod picker;
 pub mod pr;
 

@@ -15,7 +15,7 @@ just ready-all
 `ready` checks formatting, Clippy with warnings denied, Rust tests, isolated
 Python installer/configuration/watcher integration tests, and PTY smoke tests.
 `ready-all` additionally requires Docker and runs real Herdr focus and visual
-regressions. Tests use temporary directories, fake Herdr/GitHub boundaries, and
+regressions, including SSH machine switching and rendered graphics. Tests use temporary directories, fake Herdr/GitHub boundaries, and
 isolated sessions, without personal credentials or plugin registry access.
 After initial downloads, the native tests run offline.
 
@@ -95,6 +95,49 @@ configuration, never for ordinary releases or restoring user customizations.
 Preserve unrelated edits and record completion only after successful persistence.
 Add upgrade, interruption/retry, and rerun coverage when adding a migration.
 
+## Machine launcher
+
+`src/machines` owns the local `herdrpp launch` wrapper, its typed machine
+catalog, terminal transport, and embedded machine selector. This command runs
+on the viewing computer. The plugin workspace picker remains server-local.
+The existing bounded command runner handles catalog and preflight commands;
+long-lived interactive attachments use an owned PTY and process group.
+
+The launcher queues user typeahead until Herdr 0.9.5 emits its terminal setup
+marker (DECAWM reset, `CSI ? 7 l`, after host capability probing) and completes
+a synchronized render frame (`CSI ? 2026 h` through `CSI ? 2026 l`). Terminal
+replies bypass that queue. This accepts input without assuming a
+shell prompt or declaring the attachment successful. If queued input cannot
+be released within 30 seconds, the launcher reports the missing setup marker
+and attempts the previous owned attachment once; initial launches have no
+previous attachment. Compatibility is verified against Herdr 0.9.5; changes
+to this terminal setup contract need a new compatibility run.
+
+`just test-machines` runs actual Herdr and SSH attachment checks plus rendered
+Kitty graphics checks in disposable Docker containers. See
+[machine gates](../tests/machines/README.md) for exact coverage, versions,
+artifacts, and limits. Native terminal ownership checks also run in `just ready`.
+The CI machine job uploads JUnit results, terminal captures, and rendered images.
+
+## Machine browsing in the workspace picker
+
+The launcher embeds `picker::App` and `picker::ui::render_in`; there is no
+separate machine-selection screen. It resolves viewing-side picker shortcuts
+without writing config. PageUp/PageDown changes the browse context, cancels the
+previous snapshot worker, and ignores responses from earlier generations.
+Snapshots use public machine-scoped CLI requests with a private copy of the
+browsed profile, so concurrent catalog edits cannot redirect an in-flight request.
+Only Enter returns a machine-qualified workspace/tab target. The parent validates
+the current profile, activates the viewing backend, validates and focuses the
+exact target, then releases held keyboard input. Failures discard that input and
+reopen the picker with the original attachment restored. The ordinary server
+popup remains attached-server-only outside the launcher.
+
+Client teardown drains output while waiting for graceful exit, then closes the
+owned PTY before a bounded final reap. This avoids a reproduced macOS terminal
+drain deadlock. The PTY suite covers pending shutdown output through both direct
+binary startup and the exact Cargo launch invocation.
+
 ## Release preparation
 
 CI runs `just ready` on Linux and macOS. A Linux job runs all Docker focus and
@@ -109,8 +152,9 @@ GitHub repository later:
 2. In Settings → Actions → General, enable **Allow GitHub Actions to create and
    approve pull requests**. Workflows request contents, issues, pull-requests,
    and actions permissions for release automation.
-3. Require `verify (ubuntu-latest)`, `verify (macos-latest)`, and
-   `Visual snapshots and focus` through branch protection.
+3. Require `verify (ubuntu-latest)`, `verify (macos-latest)`,
+   `Visual snapshots and focus`, and `Machine switching compatibility`
+   through branch protection.
 4. Review the generated v0.1.0 release PR and wait for CI. Merge preserving its
    generated title and release metadata. The next Release run creates the tag
    and GitHub Release; the public installer can then resolve that release.

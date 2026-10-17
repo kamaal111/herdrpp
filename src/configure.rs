@@ -43,7 +43,11 @@ fn resolve(path: &Path, depth: usize) -> Result<PathBuf> {
     }
 }
 
-fn atomic_write(path: &Path, bytes: &[u8], permissions: Option<fs::Permissions>) -> Result<()> {
+pub(crate) fn atomic_write(
+    path: &Path,
+    bytes: &[u8],
+    permissions: Option<fs::Permissions>,
+) -> Result<()> {
     let parent = path.parent().context("file parent")?;
     let mut pending = tempfile::NamedTempFile::new_in(parent)?;
     if let Some(permissions) = permissions {

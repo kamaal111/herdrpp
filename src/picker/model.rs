@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use anyhow::{Result, ensure};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Workspace {
@@ -132,7 +132,7 @@ impl Snapshot {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum Target {
     Workspace(String),
     Tab(String),

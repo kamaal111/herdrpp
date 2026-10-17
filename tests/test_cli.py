@@ -25,7 +25,7 @@ def cli(tmp_path, release_binary):
 
 
 @pytest.mark.parametrize("args", [("open", "extra"), ("commands", "extra"), ("pick-command", "extra"), ("configure", "extra"),
-                                  ("--version", "extra"), ("unknown",)])
+                                  ("--version", "extra"), ("unknown",), ("machine-picker", "999999", "local", "default")])
 def test_invalid_arguments_have_no_herdr_or_configuration_side_effects(cli, args):
     run, log, state = cli
     result = run(*args)
