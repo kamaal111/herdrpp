@@ -357,7 +357,7 @@ fn render_result(frame: &mut Frame<'_>, app: &App, index: usize, area: Rect) -> 
         &result.workspace,
         app.mode == SearchMode::Flat,
         usize::from(workspace_width),
-        selected,
+        selected && app.selected_tab.is_none(),
         palette,
     );
     let hit_width = line.width().min(usize::from(workspace_width)) as u16;
@@ -374,7 +374,7 @@ fn render_result(frame: &mut Frame<'_>, app: &App, index: usize, area: Rect) -> 
     }
     let tab_x = area.x + workspace_width + 2;
     let tab_area = Rect::new(tab_x, area.y, area.right().saturating_sub(tab_x), 1);
-    let selected_tab = selected.then_some(app.selected_tab).flatten();
+    let selected_tab = selected.then(|| app.highlighted_tab()).flatten();
     let (start, visible) = tab_window(&result.tabs, selected_tab, usize::from(tab_area.width));
     let mut x = tab_area.x;
     if start > 0 && tab_area.width > 0 {

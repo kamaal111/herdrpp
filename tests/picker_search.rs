@@ -470,17 +470,6 @@ fn flat_context_owner_is_inserted_once_before_its_highest_ranked_tab() {
 }
 
 #[test]
-fn grouped_results_keep_tab_ui_order_even_when_flat_relevance_order_differs() {
-    let mut snapshot = parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap();
-    snapshot.tabs.reverse();
-    let result = Search::default().results(&snapshot, "pickercod", SearchMode::Flat);
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].workspace.target, workspace("w1"));
-    assert_eq!(ids(&result[0].tabs), vec![tab("w1:t4"), tab("w1:t8")]);
-    assert!(result[0].tabs[1].score > result[0].tabs[0].score);
-}
-
-#[test]
 fn grouped_hierarchy_keeps_worktree_owners_and_single_tabs() {
     let snapshot = parse_snapshot(include_bytes!("fixtures/worktrees.json")).unwrap();
     let result = Search::default().results(&snapshot, "", SearchMode::Hierarchical);
@@ -519,4 +508,72 @@ fn grouped_flat_results_rank_by_best_destination_with_stable_workspace_ties() {
     assert_eq!(ids(&result[1].tabs), vec![tab("w1:t8")]);
     let empty = Search::default().results(&snapshot, "nonexistenttttt", SearchMode::Flat);
     assert!(empty.is_empty());
+}
+
+#[test]
+fn grouped_search_ranks_rows_and_tabs_in_both_modes() {
+    let mut snapshot = parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap();
+    snapshot.tabs.reverse();
+    for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
+        let result = Search::default().results(&snapshot, "pickercod", mode);
+        assert_eq!(result.len(), 1);
+        assert_eq!(ids(&result[0].tabs), vec![tab("w1:t8"), tab("w1:t4")]);
+        assert!(result[0].tabs[0].score > result[0].tabs[1].score);
+        let nested = parse_snapshot(include_bytes!("fixtures/worktrees.json")).unwrap();
+        let result = Search::default().results(&nested, "multimachine codex", mode);
+        assert_eq!(result[0].workspace.target, workspace("w2"));
+        assert!(!result[0].workspace.matches_query);
+        assert!(result[0].tabs[0].matches_query);
+    }
+}
+
+#[test]
+fn remembered_nonmatching_tab_is_retained_without_affecting_rank() {
+    let snapshot = parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap();
+    for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
+        let result = Search::default().results(&snapshot, "server", mode);
+        assert_eq!(result.len(), 1);
+        assert_eq!(ids(&result[0].tabs), vec![tab("w2:t2"), tab("w2:t7")]);
+        assert!(result[0].tabs[0].matches_query);
+        let remembered = &result[0].tabs[1];
+        assert!(!remembered.matches_query);
+        assert_eq!(remembered.score, 0);
+        assert!(remembered.label_matches.is_empty());
+        assert!(
+            remembered
+                .ancestors
+                .iter()
+                .all(|ancestor| ancestor.matches.is_empty())
+        );
+        assert_eq!(remembered.ancestors[0].label, "TCG");
+    }
+}
+
+#[test]
+fn equal_scores_keep_tab_number_order_and_unfiltered_workspace_order() {
+    let mut snapshot = parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap();
+    snapshot.tabs.reverse();
+    for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
+        let result = Search::default().results(&snapshot, "colorpicker", mode);
+        assert_eq!(
+            ids(&result[0].tabs),
+            vec![tab("w1:t4"), tab("w1:t8"), tab("w1:t9")]
+        );
+        assert!(
+            result[0]
+                .tabs
+                .iter()
+                .all(|tab| tab.score == result[0].workspace.score)
+        );
+        for query in ["", "  \t"] {
+            let result = Search::default().results(&snapshot, query, mode);
+            assert_eq!(
+                result
+                    .iter()
+                    .map(|result| result.workspace.target.clone())
+                    .collect::<Vec<_>>(),
+                vec![workspace("w2"), workspace("w1"), workspace("w3")]
+            );
+        }
+    }
 }

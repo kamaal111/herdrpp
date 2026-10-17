@@ -111,9 +111,12 @@ Search is case-insensitive and fuzzy. Every space-separated term must match;
 terms can match different workspace, worktree, or tab names in the hierarchy.
 For example, `demo feature codex` finds the Codex tab in demo's feature worktree.
 
-Hierarchical mode groups linked worktrees beneath an open root workspace and
-keeps matching ancestors visible. Flat mode shows ancestor breadcrumbs and
-ranks search results by match quality. Matching tabs appear beside workspaces.
+Hierarchical mode indents linked worktrees and keeps matching ancestors
+visible. Flat mode shows ancestor breadcrumbs. Both modes rank searches by
+match quality: workspace rows by their strongest destination and tabs within
+each row by relevance. The strongest workspace or tab is selected immediately;
+Enter opens it. Equal scores prefer a workspace, then existing display order.
+Ranked worktrees can appear before their roots. Tabs appear beside their owners.
 
 Locate the plugin settings with `herdr plugin config-dir herdrpp`, and create
 `config.toml` there:
@@ -131,16 +134,19 @@ mode values are errors. See [plugin settings](examples/config.toml).
 | Typing / paste | Filter immediately |
 | ↑ / Ctrl+P | Previous workspace or worktree |
 | ↓ / Ctrl+N | Next workspace or worktree |
-| → / Tab | First or next matching tab, wrapping |
-| ← / Shift+Tab | Previous tab, wrapping; from a workspace, its last matching tab |
+| → / Tab | Next displayed tab from the highlighted tab, wrapping |
+| ← / Shift+Tab | Previous displayed tab from the highlighted tab, wrapping |
 | Enter / click ↵ OK | Focus selection and exit |
 | Esc / Ctrl+C / click Esc Cancel | Exit without switching |
 | Left click | Focus the clicked workspace or tab and exit |
 | Mouse wheel | Move through workspace rows and scroll |
 
-Selecting a workspace restores its remembered tab and pane; selecting a tab
-focuses it explicitly. Up/down clears tab selection and stops at the first or
-last workspace row. `●` marks the active destination; `›` marks selection.
+Selecting a workspace highlights both its name and its remembered tab, so
+Enter's destination is visible. The remembered tab remains available even when
+it does not match the search. Arrow/Tab navigation cycles from that highlighted
+tab. Selecting a workspace restores its remembered tab and pane; selecting a
+tab focuses it explicitly. Up/down clears tab selection and stops at the first
+or last workspace row. `●` marks the active destination; `›` marks selection.
 Enter does nothing without results. Outside clicks are ignored.
 
 The picker follows Herdr's saved theme, custom colors, and terminal appearance
@@ -149,9 +155,9 @@ unavailable. Palette compatibility is based on Herdr 0.9.5.
 
 The popup is centered, 80% wide, and at most 22 rows tall. It searches open
 destinations in the selected local session, fetching them once per opening.
-The current workspace group appears first, followed by Herdr's workspace
-order; initial selection is the first other workspace. There is no MRU history
-or branch-label search. Reopen to discover changed destinations.
+Without a search, the current workspace group appears first, followed by
+Herdr's workspace order; initial selection is the first other workspace. There
+is no MRU history or branch-label search. Reopen to discover changed destinations.
 
 ## Pull request status
 

@@ -105,7 +105,7 @@ fn single_tab_buffer(width: u16, mode: SearchMode) -> ratatui::buffer::Buffer {
 #[test]
 fn sole_tab_and_workspace_keep_highlights_and_active_markers() {
     let buffer = single_tab_buffer(40, SearchMode::Hierarchical);
-    assert_eq!(buffer[(0, 2)].symbol(), "›");
+    assert_eq!(buffer[(0, 2)].symbol(), " ");
     assert_eq!(buffer[(1, 2)].symbol(), "●");
     assert_eq!(buffer[(3, 2)].symbol(), "世");
     assert_eq!(buffer[(19, 2)].symbol(), "T");
@@ -157,21 +157,21 @@ fn worktree_buffer(width: u16, mode: SearchMode, query: &str) -> ratatui::buffer
 #[test]
 fn root_and_worktree_stay_indented_with_tabs_on_the_worktree_row() {
     let buffer = worktree_buffer(80, SearchMode::Hierarchical, "herdrpp multimachine codex");
-    assert_eq!(buffer[(3, 2)].symbol(), "h");
-    assert_eq!(buffer[(5, 3)].symbol(), "m");
-    assert_eq!(buffer[(34, 3)].symbol(), "C");
+    assert_eq!(buffer[(3, 3)].symbol(), "h");
+    assert_eq!(buffer[(5, 2)].symbol(), "m");
+    assert_eq!(buffer[(34, 2)].symbol(), "C");
     assert!(
-        buffer[(3, 2)]
+        buffer[(3, 3)]
             .modifier
             .contains(ratatui::style::Modifier::UNDERLINED)
     );
     assert!(
-        buffer[(5, 3)]
+        buffer[(5, 2)]
             .modifier
             .contains(ratatui::style::Modifier::UNDERLINED)
     );
     assert!(
-        buffer[(34, 3)]
+        buffer[(34, 2)]
             .modifier
             .contains(ratatui::style::Modifier::UNDERLINED)
     );
@@ -205,18 +205,18 @@ fn flat_workspace_breadcrumb_and_tab_share_one_row() {
 #[test]
 fn nested_single_tab_worktree_keeps_its_active_workspace_marker() {
     let buffer = worktree_buffer(80, SearchMode::Hierarchical, "just terminal");
-    let text: String = (0..80).map(|x| buffer[(x, 3)].symbol()).collect();
+    let text: String = (0..80).map(|x| buffer[(x, 2)].symbol()).collect();
     assert!(text.contains("[●Terminal]"));
-    assert_eq!(buffer[(1, 2)].symbol(), " ");
-    assert_eq!(buffer[(1, 3)].symbol(), "●");
-    assert_eq!(buffer[(5, 3)].symbol(), "j");
+    assert_eq!(buffer[(1, 3)].symbol(), " ");
+    assert_eq!(buffer[(1, 2)].symbol(), "●");
+    assert_eq!(buffer[(5, 2)].symbol(), "j");
 }
 
 #[test]
 fn narrow_rows_keep_tabs_to_the_right_instead_of_stacking() {
     let buffer = worktree_buffer(10, SearchMode::Hierarchical, "multimachine codex");
-    assert_eq!(buffer[(7, 3)].symbol(), "C");
-    assert_eq!(buffer[(8, 3)].symbol(), "…");
+    assert_eq!(buffer[(7, 2)].symbol(), "C");
+    assert_eq!(buffer[(8, 2)].symbol(), "…");
     let flat = worktree_buffer(14, SearchMode::Flat, "herdrpp multimachine codex");
     let text: String = (0..14).map(|x| flat[(x, 2)].symbol()).collect();
     assert!(text.contains("[Cod…]"));
@@ -330,19 +330,19 @@ fn app_buffer(app: &mut App, width: u16) -> ratatui::buffer::Buffer {
 #[test]
 fn dracula_hierarchy_colors_selected_root_worktree_and_tab_names() {
     let mut app = colored_worktree_app(SearchMode::Hierarchical, "herdrpp multimachine codex");
-    app.selected = Some(1);
+    app.selected_tab = None;
     let buffer = app_buffer(&mut app, 80);
-    assert_eq!(buffer[(3, 2)].fg, ratatui::style::Color::Rgb(189, 147, 249));
-    assert_eq!(buffer[(5, 3)].fg, ratatui::style::Color::Rgb(80, 250, 123));
+    assert_eq!(buffer[(3, 3)].fg, ratatui::style::Color::Rgb(189, 147, 249));
+    assert_eq!(buffer[(5, 2)].fg, ratatui::style::Color::Rgb(80, 250, 123));
     assert_eq!(
-        buffer[(34, 3)].fg,
+        buffer[(34, 2)].fg,
         ratatui::style::Color::Rgb(139, 233, 253)
     );
-    assert_eq!(buffer[(5, 3)].bg, app.theme.palette().selection_bg);
-    assert_eq!(buffer[(3, 2)].bg, app.theme.palette().panel_bg);
-    assert_eq!(buffer[(0, 3)].symbol(), "›");
+    assert_eq!(buffer[(5, 2)].bg, app.theme.palette().selection_bg);
+    assert_eq!(buffer[(3, 3)].bg, app.theme.palette().panel_bg);
+    assert_eq!(buffer[(0, 2)].symbol(), "›");
     assert!(
-        buffer[(5, 3)]
+        buffer[(5, 2)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD | ratatui::style::Modifier::UNDERLINED)
     );
@@ -371,11 +371,11 @@ fn dracula_flat_breadcrumb_keeps_each_type_color_on_selected_row() {
 fn dracula_single_tab_worktree_and_tab_have_separate_colors() {
     let mut app = colored_worktree_app(SearchMode::Hierarchical, "just terminal");
     let buffer = app_buffer(&mut app, 80);
-    assert_eq!(buffer[(5, 3)].symbol(), "j");
-    assert_eq!(buffer[(35, 3)].symbol(), "T");
-    assert_eq!(buffer[(5, 3)].fg, app.theme.palette().green);
-    assert_eq!(buffer[(35, 3)].fg, app.theme.palette().blue);
-    assert_eq!(buffer[(33, 3)].fg, app.theme.palette().text);
+    assert_eq!(buffer[(5, 2)].symbol(), "j");
+    assert_eq!(buffer[(35, 2)].symbol(), "T");
+    assert_eq!(buffer[(5, 2)].fg, app.theme.palette().green);
+    assert_eq!(buffer[(35, 2)].fg, app.theme.palette().blue);
+    assert_eq!(buffer[(33, 2)].fg, app.theme.palette().text);
 }
 
 #[test]
@@ -441,28 +441,27 @@ fn narrow_footer_keeps_both_arrow_navigation_hints_visible() {
 #[test]
 fn selected_tab_scrolls_into_view_and_wrap_resets_the_horizontal_window() {
     let mut app = colored_worktree_app(SearchMode::Hierarchical, "multimachine");
-    app.handle(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
     app.handle(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
     let buffer = app_buffer(&mut app, 24);
-    let text: String = (0..24).map(|x| buffer[(x, 3)].symbol()).collect();
+    let text: String = (0..24).map(|x| buffer[(x, 2)].symbol()).collect();
     assert!(text.contains("◀[Terminal]"));
     let hit = app
         .result_hits
         .iter()
-        .find(|hit| hit.workspace == 1 && hit.tab == Some(1))
+        .find(|hit| hit.workspace == 0 && hit.tab == Some(1))
         .unwrap()
         .area;
     assert_eq!(
         buffer[(hit.x + 1, hit.y)].bg,
         app.theme.palette().selection_bg
     );
-    assert_eq!(buffer[(5, 3)].bg, app.theme.palette().selection_bg);
+    assert_eq!(buffer[(5, 2)].bg, app.theme.palette().panel_bg);
     app.handle(Event::Key(KeyEvent::new(
         KeyCode::Right,
         KeyModifiers::NONE,
     )));
     let buffer = app_buffer(&mut app, 24);
-    let text: String = (0..24).map(|x| buffer[(x, 3)].symbol()).collect();
+    let text: String = (0..24).map(|x| buffer[(x, 2)].symbol()).collect();
     assert!(text.contains("[Codex]"));
     assert!(!text.contains("◀"));
     assert_eq!(app.selected_tab, Some(0));
@@ -474,10 +473,7 @@ fn horizontal_strip_truncates_wide_unicode_labels_by_cell_width() {
     snapshot.tabs[0].label = "世界世界世界世界".into();
     let mut app = App::new(snapshot, SearchMode::Hierarchical);
     app.set_query("colorpicker".into());
-    app.handle(Event::Key(KeyEvent::new(
-        KeyCode::Right,
-        KeyModifiers::NONE,
-    )));
+    app.handle(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
     let buffer = app_buffer(&mut app, 24);
     let hit = app
         .result_hits
@@ -502,14 +498,13 @@ fn active_tab_marker_is_retained_beside_its_workspace() {
 }
 
 #[test]
-fn workspace_stays_highlighted_with_its_selected_tab_in_both_modes() {
+fn workspace_and_remembered_tab_are_highlighted_in_both_modes() {
     for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
-        let mut app = colored_worktree_app(mode, "multimachine codex");
+        let mut app = colored_worktree_app(mode, "multimachine");
         app.selected = app
             .results
             .iter()
             .position(|result| result.workspace.workspace_id == "w2");
-        app.handle(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
         let buffer = app_buffer(&mut app, 80);
         let workspace = app
             .result_hits
@@ -529,5 +524,88 @@ fn workspace_stays_highlighted_with_its_selected_tab_in_both_modes() {
         );
         assert_eq!(buffer[(tab.x, tab.y)].bg, app.theme.palette().selection_bg);
         assert_eq!(workspace.y, tab.y);
+    }
+}
+
+#[test]
+fn strongest_tab_is_highlighted_without_highlighting_workspace_in_both_modes() {
+    for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
+        let mut app = colored_worktree_app(mode, "herdrpp multimachine codex");
+        let buffer = app_buffer(&mut app, 24);
+        let owner = app
+            .result_hits
+            .iter()
+            .find(|hit| hit.workspace == 0 && hit.tab.is_none())
+            .unwrap()
+            .area;
+        let tab = app
+            .result_hits
+            .iter()
+            .find(|hit| hit.workspace == 0 && hit.tab == Some(0))
+            .unwrap()
+            .area;
+        assert_eq!(buffer[(owner.x, owner.y)].bg, app.theme.palette().panel_bg);
+        assert_eq!(buffer[(tab.x, tab.y)].bg, app.theme.palette().selection_bg);
+        assert!(
+            buffer[(tab.x + 1, tab.y)]
+                .modifier
+                .contains(ratatui::style::Modifier::UNDERLINED)
+        );
+    }
+}
+
+#[test]
+fn remembered_tab_preview_scrolls_into_view_at_narrow_widths() {
+    let mut snapshot = parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap();
+    snapshot.workspaces[0].active_tab_id = "w1:t9".into();
+    for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
+        let mut app = App::new(snapshot.clone(), mode);
+        app.set_query("colorpicker".into());
+        let buffer = app_buffer(&mut app, 24);
+        let hit = app
+            .result_hits
+            .iter()
+            .find(|hit| hit.tab == Some(2))
+            .unwrap()
+            .area;
+        assert_eq!(app.selected_tab, None);
+        assert_eq!(buffer[(hit.x, hit.y)].bg, app.theme.palette().selection_bg);
+        assert_eq!(buffer[(hit.x + 1, hit.y)].symbol(), "T");
+        assert!(
+            !buffer[(hit.x + 1, hit.y)]
+                .modifier
+                .contains(ratatui::style::Modifier::UNDERLINED)
+        );
+    }
+}
+
+#[test]
+fn context_workspace_preview_shows_retained_tab_without_match_underlines() {
+    let snapshot = parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap();
+    for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
+        let mut app = App::new(snapshot.clone(), mode);
+        app.set_query("server".into());
+        app.results_area = ratatui::layout::Rect::new(0, 2, 80, 5);
+        app.handle(Event::Mouse(terminal_input::event::MouseEvent {
+            kind: terminal_input::event::MouseEventKind::ScrollDown,
+            column: 5,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        }));
+        let buffer = app_buffer(&mut app, 80);
+        let hit = app
+            .result_hits
+            .iter()
+            .find(|hit| hit.tab == Some(1))
+            .unwrap()
+            .area;
+        assert_eq!(app.selected_tab, None);
+        assert_eq!(buffer[(hit.x + 2, hit.y)].symbol(), "C");
+        assert_eq!(buffer[(hit.x, hit.y)].bg, app.theme.palette().selection_bg);
+        assert!(
+            !buffer[(hit.x + 2, hit.y)]
+                .modifier
+                .contains(ratatui::style::Modifier::UNDERLINED)
+        );
     }
 }

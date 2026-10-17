@@ -448,7 +448,7 @@ else:
         if self.case == "tab-cycling":
             self.client.send(b"herdrpp")
             self.client.wait("> herdrpp", "4 results")
-            self.client.send(b"\t\t\t\t\x1b[Z")
+            self.client.send(b"\t\t\t\x1b[Z")
             return self.client.wait("[Tests]", "◀", "4 results")
         query = {
             "flat-search": "herdrpp feature/search codex",
@@ -695,7 +695,12 @@ class FocusTests(unittest.TestCase):
         config = Path(self.session.run("herdr", "plugin", "config-dir", "herdrpp").strip())
         (config / "config.toml").write_text('[picker]\nsearch_mode = "flat"\n')
         self.open_picker("feature/search tests")
-        self.session.client.send(b"\t")
+        after = self.finish(b"\r", target)
+        self.assertEqual(focus_state(after), target)
+
+    def test_hierarchical_tab_enter_switches_worktree_and_preserves_its_non_root_pane(self):
+        target = self.prepare_target("feature/search", "Tests", remembered_tab="Codex")
+        self.open_picker("feature/search tests")
         after = self.finish(b"\r", target)
         self.assertEqual(focus_state(after), target)
 
@@ -745,7 +750,6 @@ class FocusTests(unittest.TestCase):
     def test_closed_destination_restores_original_tab_and_non_root_pane(self):
         target = self.prepare_target("feature/search", "Tests", remembered_tab="Codex")
         self.open_picker("feature/search tests")
-        self.session.client.send(b"\x1b[B\t")
         self.session.api("tab", "close", target[1])
         self.before = self.snapshot()
         (self.output / "destination-closed.json").write_text(json.dumps(self.before, indent=2))

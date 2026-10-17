@@ -137,20 +137,20 @@ def main():
     case(b"\x1b", loading=True)
     case(b"col\x1b")
     case(b"\r", expected=[["workspace", "focus", "w1"]])
-    case(b"codex\x1b[C\r", expected=[["tab", "focus", "w2:t7"]])
-    case(b"server\x1b[C\r", mode="flat", expected=[["tab", "focus", "w2:t2"]])
-    case(b"colorpicker\x1b[C\x1b[C\x1b[D\r", expected=[["tab", "focus", "w1:t4"]])
-    case(b"colorpicker\x1b[C\x1b[D\r", mode="flat", expected=[["tab", "focus", "w1:t9"]])
+    case(b"codex\r", expected=[["workspace", "focus", "w3"]])
+    case(b"server\r", mode="flat", expected=[["tab", "focus", "w2:t2"]])
+    case(b"colorpicker\x1b[C\x1b[C\x1b[D\r", expected=[["tab", "focus", "w1:t9"]])
+    case(b"colorpicker\x1b[C\x1b[D\r", mode="flat", expected=[["tab", "focus", "w1:t8"]])
     case(b"\x1b[C\x1b[B\x1b[A\r", expected=[["workspace", "focus", "w1"]])
-    case(b"colorpicker\t\t\t\t\r", expected=[["tab", "focus", "w1:t4"]])
-    case(b"colorpicker\x1b[Z\r", mode="flat", expected=[["tab", "focus", "w1:t9"]])
-    case(b"colorpicker\t\x1b[Z\r", expected=[["tab", "focus", "w1:t9"]])
-    case(b"exact terminal\r", expected=[["workspace", "focus", "w3"]])
-    case(b"exact terminal\r", mode="flat", expected=[["workspace", "focus", "w3"]])
-    case(b"pickercodex\x1b[C\r", mode="flat", expected=[["tab", "focus", "w1:t8"]])
+    case(b"colorpicker\t\t\t\t\r", expected=[["tab", "focus", "w1:t9"]])
+    case(b"colorpicker\x1b[Z\r", mode="flat", expected=[["tab", "focus", "w1:t4"]])
+    case(b"colorpicker\t\x1b[Z\r", expected=[["tab", "focus", "w1:t8"]])
+    case(b"exact terminal\r", expected=[["tab", "focus", "w3:t1"]])
+    case(b"exact terminal\r", mode="flat", expected=[["tab", "focus", "w3:t1"]])
+    case(b"pickercodex\r", mode="flat", expected=[["tab", "focus", "w1:t8"]])
     case(b"exact terminal\t\t\r", expected=[["tab", "focus", "w3:t1"]])
     case(b"exact terminal\x1b[Z\r", mode="flat", expected=[["tab", "focus", "w3:t1"]])
-    case(b"codexterminal\r", expected=[["workspace", "focus", "w3"]])
+    case(b"codexterminal\r", expected=[["tab", "focus", "w3:t1"]])
     case(
         b"\r",
         failure="w1",
@@ -169,17 +169,17 @@ def main():
     )
     WORKTREE_FIXTURE = ROOT / "tests/fixtures/worktrees.json"
     case(
-        b"herdrppmultimachinecodex\x0e\x1b[C\r",
+        b"herdrppmultimachinecodex\r",
         fixture=WORKTREE_FIXTURE,
         expected=[["tab", "focus", "w2:t1"]],
     )
     case(
-        b"herdrpp just terminal\x0e\r",
+        b"herdrpp just\r",
         fixture=WORKTREE_FIXTURE,
         expected=[["workspace", "focus", "w4"]],
     )
     case(
-        b"herdrpp multimachine codex\x1b[C\r",
+        b"herdrpp multimachine codex\r",
         mode="flat",
         fixture=WORKTREE_FIXTURE,
         expected=[["tab", "focus", "w2:t1"]],
@@ -196,7 +196,7 @@ def main():
             (b"\x1b[?997;2n", b"48;2;239;241;245"),
             (b"\x1b[?997;1n", b"48;2;24;24;37"),
         ],
-        expected=[["workspace", "focus", "w3"]],
+        expected=[["tab", "focus", "w3:t1"]],
     )
     print(
         "28 PTY smoke scenarios passed (Escape including slow discovery, filtering, workspace/tab focus, nested worktrees, flat mode, failure recovery; resize and terminal cleanup)"
