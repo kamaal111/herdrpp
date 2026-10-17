@@ -1,6 +1,6 @@
 id = "herdrpp"
 name = "herdr++"
-version = "0.1.0"
+version = "0.1.1"
 min_herdr_version = "0.9.5"
 description = "Search workspaces and tabs, and show GitHub PR status"
 platforms = ["macos", "linux"]
