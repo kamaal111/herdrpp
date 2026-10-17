@@ -1,12 +1,11 @@
-use herdrpp::picker::{
-    api::parse_snapshot,
-    app::App,
-    config::SearchMode,
-    ui::{label_spans, render},
-};
+use herdrpp::picker::{api::parse_snapshot, app::App, config::SearchMode, ui::label_spans};
 use ratatui::{Terminal, backend::TestBackend};
 use terminal_input::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use unicode_width::UnicodeWidthStr;
+
+fn render(frame: &mut ratatui::Frame<'_>, app: &mut App) {
+    herdrpp::picker::ui::render_content(frame, app, frame.area());
+}
 
 fn draw(width: u16, height: u16, query: &str) -> String {
     let mut app = App::new(
@@ -302,15 +301,15 @@ fn loading_panel_uses_shared_footer_with_disabled_ok() {
     let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
     let mut cancel = ratatui::layout::Rect::default();
     terminal
-        .draw(|frame| cancel = herdrpp::picker::ui::render_loading(frame, palette))
+        .draw(|frame| cancel = herdrpp::picker::ui::render_loading(frame, palette).cancel)
         .unwrap();
-    assert_eq!(cancel, ratatui::layout::Rect::new(38, 19, 12, 1));
+    assert_eq!(cancel, ratatui::layout::Rect::new(38, 18, 12, 1));
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(79, 10)].bg, palette.panel_bg);
-    assert_eq!(buffer[(30, 19)].fg, palette.overlay0);
-    assert_eq!(buffer[(38, 19)].bg, palette.surface0);
-    let padding: String = (0..80).map(|x| buffer[(x, 18)].symbol()).collect();
-    assert_eq!(padding, " ".repeat(80));
+    assert_eq!(buffer[(79, 10)].bg, palette.sidebar_bg);
+    assert_eq!(buffer[(30, 18)].fg, palette.overlay0);
+    assert_eq!(buffer[(38, 18)].bg, palette.surface0);
+    let padding: String = (9..71).map(|x| buffer[(x, 17)].symbol()).collect();
+    assert_eq!(padding, " ".repeat(62));
 }
 
 fn colored_worktree_app(mode: SearchMode, query: &str) -> App {

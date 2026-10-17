@@ -723,6 +723,17 @@ class FocusTests(unittest.TestCase):
             "herdr", "--session", "snapshot", "pane", "read", self.origin[2], "--format", "text"))
         self.assertEqual(self.snapshot()["focused_pane_id"], self.origin[2])
 
+    def test_backdrop_click_keeps_original_focus_layout_and_shell_input(self):
+        self.prepare_target("feature/search", "Tests", remembered_tab="Codex")
+        self.open_picker("feature/search tests")
+        self.session.client.send(b"\x1b[B\t")
+        after = self.finish(b"\x1b[<0;80;3M\x1b[<0;80;3m", self.origin)
+        self.assertEqual(focus_state(after), self.origin)
+        self.session.client.send(b"printf 'picker-%s-ready\\n' 'backdrop'\r")
+        self.session.client.wait("picker-backdrop-ready", absent=("Esc Cancel",))
+        self.assertIn("picker-backdrop-ready", self.session.run(
+            "herdr", "--session", "snapshot", "pane", "read", self.origin[2], "--format", "text"))
+
     def test_closed_destination_restores_original_tab_and_non_root_pane(self):
         target = self.prepare_target("feature/search", "Tests", remembered_tab="Codex")
         self.open_picker("feature/search tests")
