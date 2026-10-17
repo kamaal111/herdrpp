@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value};
 
 // Bump only for a new, targeted config migration, never for a package release.
-const CONFIG_VERSION: u32 = 1;
+const CONFIG_VERSION: u32 = 2;
 const FNV1A_64_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV1A_64_PRIME: u64 = 0x100000001b3;
 const TOKENS: [(&str, &str); 4] = [
@@ -180,15 +180,49 @@ fn migrate_sidebar(original: &str) -> Result<String> {
     Ok(document.to_string())
 }
 
-fn migrate(original: &str) -> Result<(String, bool)> {
-    let sidebar = migrate_sidebar(original)?;
-    let mut document = sidebar.parse::<DocumentMut>()?;
+fn normalized_chord(key: &str) -> Vec<String> {
+    let mut parts: Vec<_> = key
+        .split('+')
+        .map(|part| match part.trim().to_ascii_lowercase().as_str() {
+            "super" => "cmd".to_string(),
+            value => value.to_string(),
+        })
+        .collect();
+    parts.sort();
+    parts
+}
+
+fn migrate_shortcut(
+    original: &str,
+    chord: &str,
+    action: &str,
+    description: &str,
+) -> Result<(String, bool)> {
+    let mut document = original
+        .parse::<DocumentMut>()
+        .context("parse Herdr config TOML")?;
     if !document.contains_key("keys") {
         document.insert("keys", Item::Table(Table::new()));
     }
     let keys = document["keys"]
         .as_table_mut()
         .context("keys must be a TOML table")?;
+    let conflict = keys
+        .iter()
+        .filter(|(name, _)| *name != "command")
+        .any(|(_, value)| {
+            value
+                .as_str()
+                .is_some_and(|key| normalized_chord(key) == normalized_chord(chord))
+                || value.as_array().is_some_and(|keys| {
+                    keys.iter()
+                        .filter_map(Value::as_str)
+                        .any(|key| normalized_chord(key) == normalized_chord(chord))
+                })
+        });
+    if conflict {
+        return Ok((original.to_owned(), true));
+    }
     if !keys.contains_key("command") {
         keys.insert(
             "command",
@@ -197,16 +231,10 @@ fn migrate(original: &str) -> Result<(String, bool)> {
     }
     let commands = keys.get_mut("command").context("keys.command")?;
     let mut binding = Table::new();
-    binding.insert("key", toml_edit::value("cmd+p"));
+    binding.insert("key", toml_edit::value(chord));
     binding.insert("type", toml_edit::value("plugin_action"));
-    binding.insert(
-        "command",
-        toml_edit::value(format!("{}.open", crate::PLUGIN_ID)),
-    );
-    binding.insert(
-        "description",
-        toml_edit::value("Search workspaces, worktrees and tabs"),
-    );
+    binding.insert("command", toml_edit::value(action));
+    binding.insert("description", toml_edit::value(description));
     let existing = if let Some(tables) = commands.as_array_of_tables_mut() {
         let mut existing = None;
         for table in tables.iter() {
@@ -214,10 +242,10 @@ fn migrate(original: &str) -> Result<(String, bool)> {
                 .get("key")
                 .and_then(Item::as_str)
                 .context("shortcut key must be a string")?;
-            if key.eq_ignore_ascii_case("cmd+p") {
+            if normalized_chord(key) == normalized_chord(chord) {
                 existing = Some(
                     table.get("type").and_then(Item::as_str) == Some("plugin_action")
-                        && table.get("command").and_then(Item::as_str) == Some("herdrpp.open"),
+                        && table.get("command").and_then(Item::as_str) == Some(action),
                 );
                 break;
             }
@@ -236,10 +264,10 @@ fn migrate(original: &str) -> Result<(String, bool)> {
                 .get("key")
                 .and_then(Value::as_str)
                 .context("shortcut key must be a string")?;
-            if key.eq_ignore_ascii_case("cmd+p") {
+            if normalized_chord(key) == normalized_chord(chord) {
                 existing = Some(
                     table.get("type").and_then(Value::as_str) == Some("plugin_action")
-                        && table.get("command").and_then(Value::as_str) == Some("herdrpp.open"),
+                        && table.get("command").and_then(Value::as_str) == Some(action),
                 );
                 break;
             }
@@ -292,7 +320,7 @@ pub fn run() -> Result<()> {
         std::io::Error::last_os_error()
     );
     let marker = state.join("migration.json");
-    match fs::read(&marker) {
+    let completed = match fs::read(&marker) {
         Ok(bytes) => {
             let migration: Migration =
                 serde_json::from_slice(&bytes).context("read config migration state")?;
@@ -304,21 +332,53 @@ pub fn run() -> Result<()> {
                 );
                 return Ok(());
             }
+            migration.version
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
         Err(error) => return Err(error).context("read config migration state"),
-    }
+    };
     let original = match fs::read_to_string(&path) {
         Ok(text) => Some(text),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error).context("read Herdr config"),
     };
-    let (updated, shortcut_conflict) = migrate(original.as_deref().unwrap_or(""))?;
+    let mut updated = original.clone().unwrap_or_default();
+    let mut backups = Vec::new();
+    let mut conflicts = Vec::new();
+    if completed < 1 {
+        backups.push((1, updated.clone()));
+        updated = migrate_sidebar(&updated)?;
+        let (text, conflict) = migrate_shortcut(
+            &updated,
+            "cmd+p",
+            "herdrpp.open",
+            "Search workspaces, worktrees and tabs",
+        )?;
+        updated = text;
+        if conflict {
+            conflicts.push("Cmd+P is already bound; existing shortcut preserved. Add herdrpp.open manually using another key, such as prefix+f.");
+        }
+    }
+    if completed < 2 {
+        backups.push((2, updated.clone()));
+        let (text, conflict) = migrate_shortcut(
+            &updated,
+            "cmd+shift+k",
+            "herdrpp.commands",
+            "Open command palette",
+        )?;
+        updated = text;
+        if conflict {
+            conflicts.push("Cmd+Shift+K is already bound; existing shortcut preserved. Add herdrpp.commands manually using another key, such as prefix+shift+f.");
+        }
+    }
     if original.as_deref() != Some(&updated) {
-        if let Some(original) = &original {
-            let backup = state.join("before-1.toml");
-            if !backup.exists() {
-                atomic_write(&backup, original.as_bytes(), None)?;
+        if original.is_some() {
+            for (version, text) in backups {
+                let backup = state.join(format!("before-{version}.toml"));
+                if !backup.exists() {
+                    atomic_write(&backup, text.as_bytes(), None)?;
+                }
             }
         }
         fs::create_dir_all(path.parent().context("config parent")?)?;
@@ -343,10 +403,8 @@ pub fn run() -> Result<()> {
         })?,
         None,
     )?;
-    if shortcut_conflict {
-        println!(
-            "Cmd+P is already bound; existing shortcut preserved. Add herdrpp.open manually using another key, such as prefix+f."
-        );
+    for message in conflicts {
+        println!("{message}");
     }
     println!(
         "Viewing config initialized: {}. Select Reload config in the viewing client.",

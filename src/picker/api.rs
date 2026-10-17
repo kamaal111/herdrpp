@@ -61,7 +61,11 @@ impl Herdr {
         self.call_cancellable(args, &AtomicBool::new(false))
     }
 
-    fn call_cancellable(&self, args: &[&str], cancelled: &AtomicBool) -> Result<Vec<u8>> {
+    pub(crate) fn call_cancellable(
+        &self,
+        args: &[&str],
+        cancelled: &AtomicBool,
+    ) -> Result<Vec<u8>> {
         let output = crate::command::run_cancellable(
             Command::new(&self.binary).args(args),
             TIMEOUT,
@@ -98,15 +102,23 @@ impl Herdr {
     }
 
     pub fn open(&self) -> Result<()> {
-        decode(&self.call(&[
+        self.open_popup("picker", None)
+    }
+
+    pub(crate) fn open_popup(&self, entrypoint: &str, environment: Option<&str>) -> Result<()> {
+        let mut args = vec![
             "plugin",
             "pane",
             "open",
             "--plugin",
             crate::PLUGIN_ID,
             "--entrypoint",
-            "picker",
-        ])?)?;
+            entrypoint,
+        ];
+        if let Some(environment) = environment {
+            args.extend(["--env", environment]);
+        }
+        decode(&self.call(&args)?)?;
         Ok(())
     }
 

@@ -117,6 +117,7 @@ class TestInstaller:
             ["plugin", "action", "invoke", "herdrpp.start"],
         ] in self.calls()
         assert "$pr_open" in self.config.read_text()
+        assert 'key = "cmd+shift+k"' in self.config.read_text()
         assert "Reload config" in result.stdout
 
     def test_rerun_keeps_user_config_and_resolves_release_again(self):
@@ -148,6 +149,7 @@ class TestInstaller:
         result = self.install("--config-only")
         assert result.returncode == 0, result.stderr
         assert "$pr_open" in self.config.read_text()
+        assert 'key = "cmd+shift+k"' in self.config.read_text()
         assert "herdr" not in [kind for kind, _ in self.calls()]
         assert list(self.root.glob("herdrpp-install.*")) == []
 
@@ -155,6 +157,7 @@ class TestInstaller:
         result = self.install(piped=True)
         assert result.returncode == 0, result.stderr
         assert "$pr_open" in self.config.read_text()
+        assert 'key = "cmd+shift+k"' in self.config.read_text()
 
     def test_no_session_reports_startup_hook(self):
         self.env["NO_SESSION"] = "1"

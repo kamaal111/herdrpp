@@ -38,3 +38,16 @@ placement = "popup"
 width = "80%"
 height = 22
 command = ["./target/release/herdrpp", "pick"]
+
+[[actions]]
+id = "commands"
+title = "Open command palette"
+command = ["./target/release/herdrpp", "commands"]
+
+[[panes]]
+id = "command-palette"
+title = "Command Palette"
+placement = "popup"
+width = "80%"
+height = 22
+command = ["./target/release/herdrpp", "pick-command"]
