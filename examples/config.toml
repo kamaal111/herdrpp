@@ -1,0 +1,4 @@
+[picker]
+# Put in the directory printed by: herdr plugin config-dir herdrpp
+search_mode = "hierarchical"
+# Alternative: search_mode = "flat"

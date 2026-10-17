@@ -1,0 +1,20 @@
+# Apply on the computer displaying the Herdr client, including for remote use.
+# Reload config from that client's in-app menu after editing.
+# Replace $pr_number with these four styled tokens in your existing rows.
+[ui.sidebar.spaces]
+rows = [
+  [
+    "state_icon", "workspace",
+    { token = "$pr_open", fg = "#238636" },
+    { token = "$pr_draft", fg = "#8b949e" },
+    { token = "$pr_merged", fg = "#a371f7" },
+    { token = "$pr_closed", fg = "#f85149" },
+  ],
+  ["branch", "git_status"],
+]
+
+[[keys.command]]
+key = "cmd+p"
+type = "plugin_action"
+command = "herdrpp.open"
+description = "Search workspaces, worktrees and tabs"

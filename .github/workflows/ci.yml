@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+          enable-cache: true
+      - run: uv sync --locked
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: extractions/setup-just@v4
+        with:
+          just-version: '1.58.0'
+      - run: just ready
+
+  visuals:
+    name: Visual snapshots and focus
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+          enable-cache: true
+      - run: uv sync --locked
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: extractions/setup-just@v4
+        with:
+          just-version: '1.58.0'
+      - run: just test-focus test-snapshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: herdrpp-visual-diagnostics
+          path: |
+            target/snapshots/**/*.png
+            target/snapshots/**/*.txt
+            target/snapshots/**/*.ansi
+            target/snapshots/**/*.log
+            target/snapshots/**/*.json
+          retention-days: 7
+          if-no-files-found: ignore
