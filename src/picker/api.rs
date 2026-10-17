@@ -56,6 +56,22 @@ pub fn focus_args(target: &Target) -> Vec<&str> {
     }
 }
 
+fn validate_focus(result: &Value, target: &Target) -> Result<()> {
+    let (kind, record, field, expected) = match target {
+        Target::Workspace(id) => ("workspace_info", "workspace", "workspace_id", id),
+        Target::Tab(id) => ("tab_info", "tab", "tab_id", id),
+    };
+    ensure!(
+        result["type"].as_str() == Some(kind),
+        "invalid Herdr focus response type"
+    );
+    ensure!(
+        result[record][field].as_str() == Some(expected.as_str()),
+        "Herdr focus response has an unexpected destination ID"
+    );
+    Ok(())
+}
+
 impl Herdr {
     pub fn call(&self, args: &[&str]) -> Result<Vec<u8>> {
         self.call_cancellable(args, &AtomicBool::new(false))
@@ -124,19 +140,7 @@ impl Herdr {
 
     pub fn focus(&self, target: &Target) -> Result<()> {
         let result = decode(&self.call(&focus_args(target))?)?;
-        let (kind, record, field, expected) = match target {
-            Target::Workspace(id) => ("workspace_info", "workspace", "workspace_id", id),
-            Target::Tab(id) => ("tab_info", "tab", "tab_id", id),
-        };
-        ensure!(
-            result["type"].as_str() == Some(kind),
-            "invalid Herdr focus response type"
-        );
-        ensure!(
-            result[record][field].as_str() == Some(expected.as_str()),
-            "Herdr focus response has an unexpected destination ID"
-        );
-        Ok(())
+        validate_focus(&result, target)
     }
 
     pub fn notify(&self, message: &str) -> Result<()> {
@@ -148,5 +152,81 @@ impl Herdr {
             message,
         ])?)?;
         Ok(())
+    }
+}
+
+/// Public CLI routing for a launcher-owned machine, independent of inherited pane context.
+pub struct MachineApi<'a> {
+    pub binary: &'a std::ffi::OsStr,
+    pub machine: &'a str,
+    pub local_session: &'a str,
+    pub profile: Option<&'a crate::machines::catalog::Profile>,
+}
+impl MachineApi<'_> {
+    fn call(&self, args: &[&str], cancelled: &AtomicBool) -> Result<Vec<u8>> {
+        let mut command = Command::new(self.binary);
+        // Freeze the browsed profile for each public CLI request. Concurrent catalog
+        // edits must not redirect a snapshot or focus request to another SSH target.
+        let catalog = tempfile::tempdir()?;
+        for key in [
+            "HERDR_SOCKET_PATH",
+            "HERDR_CLIENT_SOCKET_PATH",
+            "HERDR_SESSION",
+            "HERDR_PANE_ID",
+            "HERDR_TAB_ID",
+            "HERDR_WORKSPACE_ID",
+        ] {
+            command.env_remove(key);
+        }
+        if self.machine == "local" {
+            command.args(["--session", self.local_session]);
+        } else {
+            let profile = self.profile.context("missing browsed machine identity")?;
+            ensure!(profile.id == self.machine, "machine identity mismatch");
+            let directory = catalog.path().join("herdr/client");
+            std::fs::create_dir_all(&directory)?;
+            std::fs::write(
+                directory.join("endpoints.json"),
+                serde_json::to_vec(&serde_json::json!({"version": 1, "ssh": [profile]}))?,
+            )?;
+            command
+                .env("XDG_STATE_HOME", catalog.path())
+                .args(["--machine", self.machine]);
+        }
+        let output = crate::command::run_cancellable(
+            command.args(args),
+            Duration::from_secs(20),
+            OUTPUT_LIMIT,
+            cancelled,
+            "machine request",
+        )?;
+        if !output.status.success() {
+            if !output.stdout.is_empty() {
+                decode(&output.stdout)?;
+            }
+            bail!(
+                "machine request failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(output.stdout)
+    }
+    pub fn snapshot(&self, cancelled: &AtomicBool) -> Result<Snapshot> {
+        parse_snapshot(&self.call(&["api", "snapshot"], cancelled)?)
+    }
+    pub fn validate_target(&self, target: &Target, cancelled: &AtomicBool) -> Result<()> {
+        let snapshot = self.snapshot(cancelled)?;
+        let exists = match target {
+            Target::Workspace(id) => snapshot.workspaces.iter().any(|w| &w.workspace_id == id),
+            Target::Tab(id) => snapshot.tabs.iter().any(|t| &t.tab_id == id),
+        };
+        ensure!(exists, "selected destination no longer exists");
+        Ok(())
+    }
+    pub fn focus_cancellable(&self, target: &Target, cancelled: &AtomicBool) -> Result<()> {
+        self.validate_target(target, cancelled)?;
+        let response = decode(&self.call(&focus_args(target), cancelled)?)?;
+        validate_focus(&response, target)
     }
 }

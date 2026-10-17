@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="34.689" timestamp="2026-10-17T20:11:02.552078+00:00" hostname="1756cd5b67e8"><testcase classname="experiments.machines.test_navigator_gate" name="test_private_navigator_binding_preserves_remote_custom_command_on_the_same_chord" time="34.636"><failure message="AssertionError: required gate failed: private navigator key intercepted an existing remote command&#10;assert False&#10; +  where False = observe_file(PosixPath('/tmp/navigator-collision-s9m6_m7c/lab/remote-custom-command'), &lt;terminal.Terminal object at 0x7ffffe435b90&gt;)">def test_private_navigator_binding_preserves_remote_custom_command_on_the_same_chord():
+        with tempfile.TemporaryDirectory(prefix='navigator-collision-') as directory:
+            lab = Lab(Path(directory) / 'lab')
+            marker = lab.root / 'remote-custom-command'
+            remote_config = Path(lab.remote['HERDR_CONFIG_PATH'])
+            remote_config.write_text(remote_config.read_text() + f'\n[[keys.command]]\nkey = "ctrl+f12"\ntype = "shell"\ncommand = "printf handled &gt; {marker}"\n')
+            try:
+                lab.start()
+                baseline = Terminal(['herdr'], lab.env, lab.root)
+                lab.clients.append(baseline)
+                completed(baseline, lambda t: 'ALPHA_ONLY' in t.text and 'BETA_ONLY' in t.text)
+                baseline.send(b'\x02g')
+                completed(baseline, lambda t: 'Go to' in t.text)
+                baseline.send(b'/Alpha')
+                completed(baseline, lambda t: ' / Alpha' in t.text)
+                accept_first_machine_heading(baseline)
+                completed(baseline, lambda t: 'Go to' not in t.text and 'new · Alpha' in t.text)
+                baseline.send(b'\x02g')
+                completed(baseline, lambda t: 'Go to' in t.text and '◆' in t.text)
+                baseline.send(b'\x1b')
+                completed(baseline, lambda t: 'Go to' not in t.text)
+                baseline.send(b'\x1b[24;5~')
+                wait_file(marker, baseline)
+                assert marker.read_text() == 'handled'
+                baseline.close()
+                lab.clients.remove(baseline)
+                marker.unlink()
+                private = lab.root / 'private-config.toml'
+                private.write_text(Path(lab.env['HERDR_CONFIG_PATH']).read_text() + '\n[keys]\ngoto = ["prefix+g", "ctrl+f12"]\n')
+                injected = Terminal(['herdr'], dict(lab.env, HERDR_CONFIG_PATH=str(private)), lab.root)
+                lab.clients.append(injected)
+                completed(injected, lambda t: 'new · Alpha' in t.text)
+                injected.send(b'\x1b[24;5~')
+                completed(injected, lambda t: 'Go to' in t.text)
+                record(injected, 'remote-custom-command-intercepted')
+&gt;               assert observe_file(marker, injected), 'required gate failed: private navigator key intercepted an existing remote command'
+E               AssertionError: required gate failed: private navigator key intercepted an existing remote command
+E               assert False
+E                +  where False = observe_file(PosixPath('/tmp/navigator-collision-s9m6_m7c/lab/remote-custom-command'), &lt;terminal.Terminal object at 0x7ffffe435b90&gt;)
+
+experiments/machines/test_navigator_gate.py:223: AssertionError</failure></testcase></testsuite></testsuites>

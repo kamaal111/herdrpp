@@ -158,15 +158,12 @@ fn typo_in_configuration_is_reported() {
 fn unavailable_cli_is_reported() {
     #[cfg(unix)]
     let _guard = CLI_TEST_LOCK.lock().unwrap();
-    assert!(
-        Herdr {
-            binary: "/nonexistent/herdrpp-test-cli".into()
-        }
-        .snapshot()
-        .unwrap_err()
-        .to_string()
-        .contains("start Herdr CLI")
-    );
+    let error = Herdr {
+        binary: "/nonexistent/herdrpp-test-cli".into(),
+    }
+    .snapshot()
+    .unwrap_err();
+    assert!(error.to_string().contains("start Herdr CLI"), "{error:#}");
 }
 
 #[cfg(unix)]

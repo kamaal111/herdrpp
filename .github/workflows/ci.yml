@@ -60,3 +60,27 @@ jobs:
             target/snapshots/**/*.json
           retention-days: 7
           if-no-files-found: ignore
+
+  machines:
+    name: Machine switching compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v4
+        with:
+          just-version: '1.58.0'
+      - run: just test-machines
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: herdrpp-machine-diagnostics
+          path: |
+            target/machine-switching/**/*.xml
+            target/machine-switching/**/*.png
+            target/machine-switching/**/*.txt
+            target/machine-switching/**/*.ansi
+            target/machine-switching/**/*.log
+            target/machine-switching/**/*.json
+          retention-days: 7
+          if-no-files-found: ignore

@@ -31,8 +31,8 @@ quality: format-check lint
 
 ready: quality test test-pty
 
-# Full release verification, including real Herdr focus and visual checks.
-ready-all: ready test-focus test-snapshots
+# Full release verification, including focus, visuals, and machine switching.
+ready-all: ready test-focus test-snapshots test-machines
 
 test-focus:
     sh tests/snapshots/run.sh --focus-tests
@@ -71,3 +71,7 @@ plugin-stop:
 
 plugin-unlink:
     "${HERDR_BIN_PATH:-herdr}" plugin unlink herdrpp
+
+# Real SSH and rendered graphics gates for the production launcher (Docker required).
+test-machines:
+    sh tests/machines/run.sh all

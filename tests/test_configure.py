@@ -22,6 +22,7 @@ class TestConfigure:
             HERDR_CONFIG_PATH=str(self.config),
             XDG_STATE_HOME=str(self.state),
         )
+        self.env.pop("XDG_CONFIG_HOME", None)
 
     def run_configure(self):
         return subprocess.run(
@@ -224,6 +225,23 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         del self.env["HERDR_CONFIG_PATH"]
         assert self.run_configure().returncode == 0
         assert "$pr_open" in (self.root / ".config/herdr/config.toml").read_text()
+
+    def test_xdg_config_home_takes_precedence_over_home(self):
+        del self.env["HERDR_CONFIG_PATH"]
+        directory = self.root / "xdg-config"
+        self.env["XDG_CONFIG_HOME"] = str(directory)
+        result = self.run_configure()
+        assert result.returncode == 0, result.stderr
+        assert "$pr_open" in (directory / "herdr/config.toml").read_text()
+        assert not (self.root / ".config/herdr/config.toml").exists()
+
+    def test_explicit_config_path_takes_precedence_over_xdg_config_home(self):
+        directory = self.root / "xdg-config"
+        self.env["XDG_CONFIG_HOME"] = str(directory)
+        result = self.run_configure()
+        assert result.returncode == 0, result.stderr
+        assert "$pr_open" in self.config.read_text()
+        assert not (directory / "herdr/config.toml").exists()
 
     def test_first_run_adds_picker_shortcut(self):
         import tomllib

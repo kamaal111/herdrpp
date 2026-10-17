@@ -15,11 +15,11 @@ for argument in "$@"; do
     --dry-run) dry_run=1 ;;
     --help|-h)
       printf '%s\n' 'Usage: install.sh [--plugin-only | --config-only] [--dry-run]' \
-        'Default: install the latest release through Herdr and initialize local sidebar tokens and the picker and command palette shortcuts.' \
+        'Default: install the latest release through Herdr and install the local launcher, sidebar tokens, and picker and command palette shortcuts.' \
         '--plugin-only: install on the server without changing viewing config.' \
-        '--config-only: configure the viewing computer without registering a plugin.' \
+        '--config-only: install the local launcher and configure the viewing computer without registering a plugin.' \
         'Requires curl, Python 3, and Rust/Cargo; plugin installation also needs Herdr, git, and gh.' \
-        'Honors HERDR_BIN_PATH, HERDR_CONFIG_PATH, and XDG_STATE_HOME.'
+        'Honors HERDR_BIN_PATH, HERDR_CONFIG_PATH, XDG_STATE_HOME, and XDG_BIN_HOME (default ~/.local/bin).'
       exit 0
       ;;
     *) printf 'Error: unknown option: %s\n' "$argument" >&2; exit 1 ;;
@@ -32,6 +32,7 @@ if [[ "$dry_run" == 1 ]]; then
     printf 'Would install that exact tag through Herdr and start it if a session is running.\n'
   fi
   if [[ "$mode" != plugin-only ]]; then
+    printf 'Would install the local launcher at %s/herdrpp.\n' "${XDG_BIN_HOME:-$HOME/.local/bin}"
     printf 'Would apply pending config migrations to %s; completed migrations leave it untouched.\n' \
       "${HERDR_CONFIG_PATH:-$HOME/.config/herdr/config.toml}"
   fi
@@ -57,7 +58,14 @@ for executable in "${required[@]}"; do
 done
 
 temporary="$(mktemp -d "${TMPDIR:-/tmp}/herdrpp-install.XXXXXX")"
-trap 'rm -rf "$temporary"' EXIT
+launcher_temporary=""
+cleanup() {
+  rm -rf "$temporary"
+  if [[ -n "$launcher_temporary" ]]; then
+    rm -f "$launcher_temporary"
+  fi
+}
+trap cleanup EXIT
 curl --fail --silent --show-error --location \
   https://api.github.com/repos/kamaal111/herdrpp/releases/latest >"$temporary/release.json"
 release_tag="$(python3 - "$temporary/release.json" <<'PY'
@@ -103,7 +111,24 @@ PY
     printf 'Error: release %s does not include config setup; choose a release with configure or set up manually.\n' "$release_tag" >&2
     exit 1
   fi
+  if ! "$binary" --help | grep -q '^launch '; then
+    printf 'Error: release %s does not include the machine launcher; choose a release with launch.\n' "$release_tag" >&2
+    exit 1
+  fi
   "$binary" configure
+  launcher_directory="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  mkdir -p "$launcher_directory"
+  if [[ -d "$launcher_directory/herdrpp" ]]; then
+    printf 'Error: launcher destination is a directory: %s/herdrpp\n' "$launcher_directory" >&2
+    exit 1
+  fi
+  launcher_temporary="$(mktemp "$launcher_directory/.herdrpp.XXXXXX")"
+  cp "$binary" "$launcher_temporary"
+  chmod 755 "$launcher_temporary"
+  mv -f "$launcher_temporary" "$launcher_directory/herdrpp"
+  launcher_temporary=""
+  printf 'Local launcher installed at %s/herdrpp.\n' "$launcher_directory"
+  printf 'Run that executable with launch from your local terminal; add its directory to PATH if needed.\n'
 fi
 
 if [[ "$mode" != config-only ]]; then

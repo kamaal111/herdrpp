@@ -342,7 +342,10 @@ fn render_result(frame: &mut Frame<'_>, app: &App, index: usize, area: Rect) -> 
 }
 
 pub fn render(frame: &mut Frame<'_>, app: &mut App) {
-    let area = frame.area();
+    render_in(frame, app, frame.area());
+}
+
+pub fn render_in(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
     let palette = app.theme.palette();
     frame.render_widget(Paragraph::new("").style(palette.base_style()), area);
     app.ok_area = Rect::default();

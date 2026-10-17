@@ -21,7 +21,9 @@ curl -fsSL https://raw.githubusercontent.com/kamaal111/herdrpp/main/install.sh |
 
 The installer installs the latest stable release at its exact tag, initializes
 PR sidebar tokens and available Cmd+P and Cmd+Shift+K shortcuts, and requests watcher startup
-when a session is running. Authenticate `gh` on the server with `gh auth login`.
+when a session is running. It also installs a persistent local `herdrpp` binary
+at `${XDG_BIN_HOME:-$HOME/.local/bin}/herdrpp`. Add that directory to your PATH.
+Authenticate `gh` on the server with `gh auth login`.
 Then select **Reload config** in the viewing client's menu. If either shortcut is already
 bound, setup preserves it and reports how to add another shortcut.
 
@@ -45,11 +47,13 @@ curl -fsSL https://raw.githubusercontent.com/kamaal111/herdrpp/main/install.sh |
 ```
 
 Config-only mode requires curl, Python 3, tar, and Rust/Cargo. It builds the
-configuration helper in a temporary directory and removes it afterward. It
-needs no Herdr server, `gh`, or GitHub authentication. Windows viewing clients
-can use the manual configuration below.
+launcher in a temporary directory, copies the executable to
+`${XDG_BIN_HOME:-$HOME/.local/bin}/herdrpp`, and removes build files afterward.
+It needs no running Herdr server, `gh`, or GitHub authentication. Windows
+viewing clients can use the manual configuration below.
 
-The installer honors `HERDR_BIN_PATH`, `HERDR_CONFIG_PATH`, and `XDG_STATE_HOME`.
+The installer honors `HERDR_BIN_PATH`, `HERDR_CONFIG_PATH`, `XDG_STATE_HOME`,
+and `XDG_BIN_HOME`. Plugin-only mode leaves the local launcher untouched.
 Use `bash install.sh --help` or `bash install.sh --dry-run` in a checkout to
 inspect it without changing your installation.
 
@@ -109,7 +113,8 @@ preserves comments, custom styles, unrelated settings, and existing bindings.
 Invalid TOML or unsupported layouts fail without changing the config. State
 and original-file backups live under
 `${XDG_STATE_HOME:-$HOME/.local/state}/herdrpp/configs/`. Retain these records
-to preserve once-only setup. Runtime actions never modify settings.
+to preserve once-only setup. The native machine launcher reconciles explicit Settings edits through the same
+atomic writer; private controller bindings are removed before persistence.
 
 ## Workspace search
 
@@ -201,6 +206,81 @@ Setup version 2 adds only the Cmd+Shift+K binding to installations that already
 completed version 1. It preserves removed sidebar tokens and Cmd+P bindings.
 Subsequent installs do not restore a deliberately removed palette shortcut.
 Existing conflicting shortcuts are preserved and reported for manual setup.
+## Machine search
+
+The launcher is verified with Herdr **0.9.5** on macOS and Linux. Start Herdr
+through it on the viewing computer:
+
+```sh
+herdrpp launch --session default
+# Or start at an existing enabled machine profile:
+herdrpp launch --machine PROFILE_ID --session default
+```
+
+To try this branch from its checkout on the viewing computer:
+
+```sh
+just plugin-link
+./target/release/herdrpp launch
+```
+
+`plugin-link` already builds release. Start the launcher from a local terminal;
+linking the plugin alone does not enable machine switching in a normally started
+Herdr client. No Herdr source changes or additional viewing config edits are
+required.
+
+Open the workspace picker with its configured shortcut (default **Cmd+P**)
+or **Ctrl+]**. Inside that same picker, **PageUp/PageDown** or the header arrows
+cycle through Local and enabled saved machines. The header identifies the
+machine, session, and profile. Search and workspace/tab navigation apply to the
+machine being browsed; search text is retained when cycling. Browsing is read-only:
+**Enter** attaches and focuses the selected workspace or tab, while **Esc** leaves
+the original attachment unchanged. Loading, empty, and unavailable machines cannot
+be activated. Failed selections reopen the picker with an error; failed-destination
+typeahead is discarded. **Ctrl+\** exits the launcher without stopping servers.
+
+The picker runs on the viewing computer; remote machines do not need this plugin
+installed for machine browsing. The ordinary `herdrpp.open` server-side popup
+outside the launcher remains scoped to its attached server. The launcher recognizes
+its configured picker keyboard shortcut locally; invoking a plugin action through
+a separate CLI process does not address the launcher.
+
+Run `herdr machine list --json` to inspect profile IDs. The local session passed
+to the launcher is retained; each remote profile supplies its own SSH target and
+session. Profile IDs identify destinations even when display names or workspace
+IDs overlap. A profile changed during browsing must be selected again.
+
+This alternative drives Herdr's native GoTo navigator in an owned viewing
+client. The first native switch replaces the isolated bootstrap viewer; later
+native switches retain that viewer and its federated connections. The bootstrap
+starts the local server with your ordinary configuration. A private client
+configuration reuses only the launcher's two public reserved chords for GoTo
+and Reload config, preserving other bindings. Original labels, configuration,
+layout and native sidebar preferences are retained. Temporary ASCII machine
+aliases identify profile IDs during each bounded transaction, then are restored
+before input resumes. A fresh native current-pane marker acknowledges the
+committed machine; remembered selection files only provide a picker highlight.
+
+A viewport smaller than 70 columns or 18 rows, an empty or unavailable native
+pane view, unsupported Herdr versions, binding conflicts, or an unacknowledged
+native transaction uses reattachment with a visible reason. Direct
+`--machine` startup also uses reattachment. After fallback the launcher stays
+in that mode for the rest of the session. Server sessions and busy panes keep
+running. A failed preflight preserves the current viewer; a failed replacement
+attempts to restore the previous destination. Input queued for a failed
+replacement is discarded before the previous destination accepts input.
+
+Machine profiles and saved sidebar preferences are mirrored into private client
+state. Catalog changes and explicit native Settings edits reconcile once per second
+while the native viewer is active, when the picker opens, and on exit. External
+configuration edits reload the native viewer after reconciliation. Disjoint configuration edits merge; conflicting
+edits preserve both copies and report recovery locations. Original configuration
+never receives the internal bindings or temporary aliases, and the shared
+remembered machine selection remains unchanged. Native GoTo remains available
+across machines while the native controller is active. In fallback mode each
+viewer contains one endpoint; manage profiles with the regular `herdr machine`
+CLI and use this picker for machine changes. The standalone workspace picker
+retains its server-local scope.
 
 ## Pull request status
 
@@ -241,6 +321,11 @@ not a crash supervisor. Collapsed/mobile layouts are controlled by Herdr.
 - **Closed destination:** the picker exits and attempts original-focus
   restoration. Reopen for fresh results. Errors reach stderr and Herdr
   notifications, subject to Herdr's `[ui.toast]` settings.
+- **Machine connection:** inspect `herdr machine status PROFILE_ID --json`.
+  Run `herdr machine reconnect PROFILE_ID` outside the launcher when SSH needs
+  authentication. Failed checks retain the current viewing attachment.
+- **Local launcher missing:** add `${XDG_BIN_HOME:-$HOME/.local/bin}` to PATH,
+  or invoke its `herdrpp` executable directly with `launch`.
 - **PR missing:** verify the viewing client's tokens, reload config, and expand
   repository groups. Inspect `herdr workspace get WORKSPACE_ID` on the server;
   populated metadata indicates a client layout issue.

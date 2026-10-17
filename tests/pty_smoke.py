@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import pty
+import select
 import selectors
 import struct
 import subprocess
@@ -37,6 +38,12 @@ else:
 """
 
 
+def stable_terminal_attributes(fd):
+    attributes = termios.tcgetattr(fd)
+    attributes[3] &= ~termios.PENDIN
+    return attributes
+
+
 def read_until(fd, needle):
     deadline = time.monotonic() + 8
     received = b""
@@ -47,6 +54,25 @@ def read_until(fd, needle):
             if selector.select(0.1):
                 received += os.read(fd, 65536)
     return received
+
+
+def write_all(fd, data, timeout=15):
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    offset = 0
+    received = bytearray()
+    deadline = time.monotonic() + timeout
+    try:
+        while offset < len(data):
+            assert time.monotonic() < deadline, f"host input stalled after {offset} bytes"
+            readable, writable, _ = select.select([fd], [fd], [], 0.1)
+            if readable:
+                received.extend(os.read(fd, 65536))
+            if writable:
+                offset += os.write(fd, data[offset:])
+    finally:
+        fcntl.fcntl(fd, fcntl.F_SETFL, flags)
+    return bytes(received)
 
 
 def case(

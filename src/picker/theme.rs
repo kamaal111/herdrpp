@@ -760,13 +760,17 @@ pub fn config_path(
     })
 }
 
+pub fn viewing_config_path() -> PathBuf {
+    config_path(
+        env::var_os("HERDR_CONFIG_PATH").map(PathBuf::from),
+        env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        env::var_os("HOME").map(PathBuf::from),
+    )
+}
+
 impl Theme {
     pub fn load() -> (Self, Vec<String>) {
-        let path = config_path(
-            env::var_os("HERDR_CONFIG_PATH").map(PathBuf::from),
-            env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
-            env::var_os("HOME").map(PathBuf::from),
-        );
+        let path = viewing_config_path();
         Self::load_path(&path)
     }
 

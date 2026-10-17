@@ -25,7 +25,7 @@ struct Migration {
     version: u32,
 }
 
-fn resolve(path: &Path, depth: usize) -> Result<PathBuf> {
+pub(crate) fn resolve(path: &Path, depth: usize) -> Result<PathBuf> {
     ensure!(depth < 64, "too many config path symlinks");
     if let Ok(target) = fs::read_link(path) {
         return resolve(
@@ -43,7 +43,11 @@ fn resolve(path: &Path, depth: usize) -> Result<PathBuf> {
     }
 }
 
-fn atomic_write(path: &Path, bytes: &[u8], permissions: Option<fs::Permissions>) -> Result<()> {
+pub(crate) fn atomic_write(
+    path: &Path,
+    bytes: &[u8],
+    permissions: Option<fs::Permissions>,
+) -> Result<()> {
     let parent = path.parent().context("file parent")?;
     let mut pending = tempfile::NamedTempFile::new_in(parent)?;
     if let Some(permissions) = permissions {
@@ -286,11 +290,40 @@ fn migrate_shortcut(
     Ok((document.to_string(), existing == Some(false)))
 }
 
+pub(crate) fn lock_at(state: &Path) -> Result<File> {
+    fs::create_dir_all(state).context("create config state directory")?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(state.join("lock"))?;
+    // SAFETY: the descriptor remains open for the lifetime of the returned File.
+    ensure!(
+        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } == 0,
+        "lock config: {}",
+        std::io::Error::last_os_error()
+    );
+    Ok(lock)
+}
+
+pub(crate) fn viewing_config_path() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("HERDR_CONFIG_PATH") {
+        return Ok(path.into());
+    }
+    let directory = match std::env::var_os("XDG_CONFIG_HOME") {
+        Some(path) => PathBuf::from(path),
+        None => {
+            PathBuf::from(std::env::var_os("HOME").context("XDG_CONFIG_HOME or HOME is required")?)
+                .join(".config")
+        }
+    };
+    Ok(directory.join("herdr/config.toml"))
+}
+
 pub fn run() -> Result<()> {
     let home = PathBuf::from(std::env::var_os("HOME").context("HOME is required")?);
-    let selected = std::env::var_os("HERDR_CONFIG_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config/herdr/config.toml"));
+    let selected = viewing_config_path()?;
     let path = resolve(&std::env::current_dir()?.join(selected), 0)?;
     // Stable hash for filesystem naming; compare the full path in the marker
     // before trusting it, so a collision cannot skip another config's setup.
@@ -307,18 +340,7 @@ pub fn run() -> Result<()> {
         .join("herdrpp/configs")
         .join(format!("{hash:016x}"));
     fs::create_dir_all(&state).context("create config migration directory")?;
-    let lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(state.join("lock"))?;
-    // SAFETY: lock owns a valid descriptor and remains open for the migration.
-    ensure!(
-        unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } == 0,
-        "lock config migration: {}",
-        std::io::Error::last_os_error()
-    );
+    let _lock = lock_at(&state)?;
     let marker = state.join("migration.json");
     let completed = match fs::read(&marker) {
         Ok(bytes) => {

@@ -69,6 +69,7 @@ class TestInstaller:
             HERDR_CONFIG_PATH=str(self.config),
             XDG_STATE_HOME=str(self.root / "state"),
             TMPDIR=str(self.root),
+            XDG_BIN_HOME=str(self.root / ".local/bin"),
         )
 
     def install(self, *args, piped=False):
@@ -140,10 +141,62 @@ class TestInstaller:
             ],
         ] in self.calls()
 
+    def test_config_only_keeps_a_runnable_launcher_after_temporary_cleanup(self):
+        result = self.install("--config-only")
+        launcher = self.root / ".local/bin/herdrpp"
+        assert result.returncode == 0, result.stderr
+        assert launcher.is_file()
+        assert not launcher.is_symlink()
+        assert os.access(launcher, os.X_OK)
+        assert list(self.root.glob("herdrpp-install.*")) == []
+        help_result = subprocess.run(
+            [str(launcher), "--help"], text=True, capture_output=True, check=False
+        )
+        assert help_result.returncode == 0, help_result.stderr
+        assert "launch " in help_result.stdout
+
+    def test_unset_bin_path_defaults_to_home_local_bin(self):
+        del self.env["XDG_BIN_HOME"]
+        result = self.install("--config-only")
+        assert result.returncode == 0, result.stderr
+        assert (self.root / ".local/bin/herdrpp").read_bytes() == self.binary.read_bytes()
+
+    def test_directory_at_launcher_destination_is_preserved_and_reports_failure(self):
+        destination = self.root / ".local/bin/herdrpp"
+        destination.mkdir(parents=True)
+        (destination / "keep").write_text("original")
+        result = self.install("--config-only")
+        assert result.returncode != 0
+        assert "launcher destination is a directory" in result.stderr
+        assert (destination / "keep").read_text() == "original"
+        assert list(destination.iterdir()) == [destination / "keep"]
+        assert "installation completed" not in result.stdout
+
+    def test_combined_installs_launcher_at_custom_bin_path_with_spaces(self):
+        destination = self.root / "viewing tools"
+        self.env["XDG_BIN_HOME"] = str(destination)
+        result = self.install()
+        assert result.returncode == 0, result.stderr
+        assert (destination / "herdrpp").read_bytes() == self.binary.read_bytes()
+        assert str(destination / "herdrpp") in result.stdout
+
+    def test_reinstall_atomically_replaces_launcher_without_following_symlink(self):
+        destination = self.root / ".local/bin"
+        destination.mkdir(parents=True)
+        unrelated = self.root / "unrelated"
+        unrelated.write_text("keep me")
+        (destination / "herdrpp").symlink_to(unrelated)
+        result = self.install("--config-only")
+        assert result.returncode == 0, result.stderr
+        assert unrelated.read_text() == "keep me"
+        assert not (destination / "herdrpp").is_symlink()
+        assert (destination / "herdrpp").read_bytes() == self.binary.read_bytes()
+
     def test_plugin_only_never_touches_config(self):
         assert self.install("--plugin-only").returncode == 0
         assert not self.config.exists()
         assert not (self.root / "state").exists()
+        assert not (self.root / ".local/bin/herdrpp").exists()
 
     def test_config_only_builds_without_registering_or_starting_plugin(self):
         result = self.install("--config-only")

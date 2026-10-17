@@ -81,7 +81,10 @@ session loss prevent reload. State and append-only logs live under
 
 ## Viewing setup
 
-`src/configure.rs` is the sole owner of viewing config writes. Setup version 1
+`src/configure.rs` owns the shared atomic viewing-config writer. The native
+machine launcher uses it for private configuration and reconciled native
+Settings edits; `navigator_config.rs` owns the three-way merge and strips
+controller bindings before persistence. Setup version 1
 adds sidebar tokens and an available Cmd+P binding in one atomic change.
 Conflicting shortcuts are preserved and reported for manual resolution.
 Completion, locks, and original backups live under
@@ -95,10 +98,32 @@ configuration, never for ordinary releases or restoring user customizations.
 Preserve unrelated edits and record completion only after successful persistence.
 Add upgrade, interruption/retry, and rerun coverage when adding a migration.
 
+## Machine browsing in the workspace picker
+
+The launcher embeds `picker::App` and `picker::ui::render_in`; there is no
+separate machine-selection screen. It resolves viewing-side picker shortcuts
+without writing config. PageUp/PageDown changes the browse context, cancels the
+previous snapshot worker, and ignores responses from earlier generations.
+Snapshots use public machine-scoped CLI requests with a private copy of the
+browsed profile, so concurrent catalog edits cannot redirect an in-flight request.
+Only Enter returns a machine-qualified workspace/tab target. The parent validates
+the current profile, activates the viewing backend, validates and focuses the
+exact target, then releases held keyboard input. Failures discard that input and
+reopen the picker with the original attachment restored. The ordinary server
+popup remains attached-server-only outside the launcher.
+
+Client teardown drains output while waiting for graceful exit, then closes the
+owned PTY before a bounded final reap. This avoids a reproduced macOS terminal
+drain deadlock. The PTY suite covers pending shutdown output through both direct
+binary startup and the exact Cargo launch invocation.
+
 ## Release preparation
 
 CI runs `just ready` on Linux and macOS. A Linux job runs all Docker focus and
-visual checks, repeats captures, and uploads diagnostics. Baseline recording is
+visual checks, repeats captures, and uploads diagnostics. A separate Linux
+machine job verifies production SSH routing and actual Kitty rendering;
+`tests/machines/navigator_gate.py` additionally rejects fallback and requires
+the native viewer PID to survive subsequent machine switches. Baseline recording is
 forbidden in CI. Require these checks before publishing a release.
 
 The Release workflow uses Release Please with `GITHUB_TOKEN`. When creating the
@@ -132,3 +157,25 @@ branch, including updates. CI also supports manual workflow dispatch as a retry.
 For transient release failures, rerun Release on main. No personal token is
 required. GitHub creation, permissions, pushes, and publishing are separate
 operator steps; local checks cannot prove hosted workflow execution.
+
+## Native machine transaction contract
+
+The native controller supports Herdr 0.9.5 and uses complete VT token/frame
+observation. It first observes a private catalog generation with short ASCII
+aliases, identifies the actual prior machine from a native current-pane marker,
+selects the target machine header, and verifies its native current-pane ancestry.
+It then restores the catalog and observes alias removal before replaying input.
+In upstream `src/client/endpoint/activation.rs`, coherent target projection can
+precede the final presentation-effects fence. `src/client/shell_runtime.rs` only
+unfreezes pane input after that fence. `src/client/mod.rs` only applies catalog
+reloads when `pending_activation` is absent, so observed alias insertion/removal
+provides the final input-ready barrier. Neither selection files nor a shell
+prompt substitutes for this barrier.
+
+A one-second reconciliation tick runs only in the ordinary forwarding loop,
+never during a paused picker or alias inspection. It reconciles native Settings,
+external config edits and saved preferences; changed config reloads through the
+already reserved internal Reload chord. Conflicts preserve user/private files
+and recovery copies. Native GoTo owns modal Ctrl+U before custom-command
+dispatch (`src/client/shell/input.rs` and `shell/overlay_input.rs` upstream);
+production tests preserve normal local/remote Ctrl+U commands.
