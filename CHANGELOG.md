@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/kamaal111/herdrpp/compare/v0.1.1...v0.1.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **picker:** restore the compact popup ([ad3043d](https://github.com/kamaal111/herdrpp/commit/ad3043d0c00a1b9256cb48f85c1835d099ce713d))
+
 ## [0.1.1](https://github.com/kamaal111/herdrpp/compare/v0.1.0...v0.1.1) (2026-10-17)
 
 
