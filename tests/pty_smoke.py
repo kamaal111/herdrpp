@@ -136,8 +136,6 @@ def main():
     case(b"\x1b")
     case(b"\x1b", loading=True)
     case(b"col\x1b")
-    case(b"\x1b[<0;1;1M", resize=False)
-    case(b"\x1b[<0;1;1M", resize=False, loading=True)
     case(b"\r", expected=[["workspace", "focus", "w1"]])
     case(b"codex\x1b[C\r", expected=[["tab", "focus", "w2:t7"]])
     case(b"server\x1b[C\r", mode="flat", expected=[["tab", "focus", "w2:t2"]])
@@ -186,10 +184,10 @@ def main():
         fixture=WORKTREE_FIXTURE,
         expected=[["tab", "focus", "w2:t1"]],
     )
-    case(b"\x1b[<0;31;19M", resize=False, expected=[["workspace", "focus", "w1"]])
-    case(b"\x1b[<0;39;19M", resize=False)
-    case(b"\x1b[<0;39;19M", resize=False, loading=True)
-    case(b"nonexistenttttt\x1b[<0;31;19M\x1b[<0;39;19M", resize=False)
+    case(b"\x1b[<0;31;20M", resize=False, expected=[["workspace", "focus", "w1"]])
+    case(b"\x1b[<0;39;20M", resize=False)
+    case(b"\x1b[<0;39;20M", resize=False, loading=True)
+    case(b"nonexistenttttt\x1b[<0;31;20M\x1b[<0;39;20M", resize=False)
     AUTO_THEME = "[theme]\nname = 'catppuccin'\nauto_switch = true\n"
     case(b"\x1b", theme=AUTO_THEME, loading=True)
     case(
@@ -201,7 +199,7 @@ def main():
         expected=[["workspace", "focus", "w3"]],
     )
     print(
-        "30 PTY smoke scenarios passed (Escape including slow discovery, filtering, workspace/tab focus, nested worktrees, flat mode, failure recovery; resize and terminal cleanup)"
+        "28 PTY smoke scenarios passed (Escape including slow discovery, filtering, workspace/tab focus, nested worktrees, flat mode, failure recovery; resize and terminal cleanup)"
     )
 
 

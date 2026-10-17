@@ -723,15 +723,23 @@ class FocusTests(unittest.TestCase):
             "herdr", "--session", "snapshot", "pane", "read", self.origin[2], "--format", "text"))
         self.assertEqual(self.snapshot()["focused_pane_id"], self.origin[2])
 
-    def test_backdrop_click_keeps_original_focus_layout_and_shell_input(self):
+    def test_compact_picker_preserves_visible_terminal_and_ignores_outside_click(self):
         self.prepare_target("feature/search", "Tests", remembered_tab="Codex")
+        self.session.run("herdr", "--session", "snapshot", "pane", "send-text", self.origin[2],
+                         "printf 'terminal-%s-visible\\n' 'around-picker'")
+        self.session.run("herdr", "--session", "snapshot", "pane", "send-keys", self.origin[2], "enter")
+        self.session.client.wait("terminal-around-picker-visible")
         self.open_picker("feature/search tests")
-        self.session.client.send(b"\x1b[B\t")
-        after = self.finish(b"\x1b[<0;80;3M\x1b[<0;80;3m", self.origin)
+        self.assertIn("terminal-around-picker-visible", "\n".join(self.session.client.screen.display))
+        self.session.client.send(b"\x1b[B\t\x1b[<0;80;3M\x1b[<0;80;3m")
+        self.session.client.wait("> feature/search tests", "Esc Cancel", "terminal-around-picker-visible")
+        self.assertEqual(focus_state(self.snapshot()), self.origin)
+        self.assertEqual(layout_state(self.snapshot()), layout_state(self.before))
+        after = self.finish(b"\x1b", self.origin)
         self.assertEqual(focus_state(after), self.origin)
-        self.session.client.send(b"printf 'picker-%s-ready\\n' 'backdrop'\r")
-        self.session.client.wait("picker-backdrop-ready", absent=("Esc Cancel",))
-        self.assertIn("picker-backdrop-ready", self.session.run(
+        self.session.client.send(b"printf 'picker-%s-ready\\n' 'compact'\r")
+        self.session.client.wait("picker-compact-ready", absent=("Esc Cancel",))
+        self.assertIn("picker-compact-ready", self.session.run(
             "herdr", "--session", "snapshot", "pane", "read", self.origin[2], "--format", "text"))
 
     def test_closed_destination_restores_original_tab_and_non_root_pane(self):
