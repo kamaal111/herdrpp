@@ -20,6 +20,7 @@ import time
 import pytest
 import pyte
 from PIL import Image, ImageChops, ImageDraw, ImageFont
+from snapshot_actions import completed_action, stop_startup_watcher
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = Path("/output")
@@ -299,67 +300,14 @@ class Session:
         return json.loads(self.run("herdr", "--session", "snapshot", *args))["result"]
 
     def action(self, action):
-        invocation = self.api("plugin", "action", "invoke", f"herdrpp.{action}")
-        log_id = invocation["log"]["log_id"]
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            logs = self.api(
-                "plugin", "log", "list", "--plugin", "herdrpp", "--limit", "20"
-            )["logs"]
-            completed = next(
-                (
-                    log
-                    for log in logs
-                    if log["log_id"] == log_id and log["status"] != "running"
-                ),
-                None,
-            )
-            if completed is not None:
-                assert completed["status"] == "succeeded", completed
-                return completed
-            time.sleep(0.05)
-        raise TimeoutError(f"Plugin action {action} did not finish: {logs}")
+        return completed_action(self.api, action)
 
     def refresh(self):
         completed = self.action("refresh")
         assert "already in progress" not in (completed.get("stdout") or ""), completed
 
     def stop_startup_watcher(self):
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            logs = self.api(
-                "plugin", "log", "list", "--plugin", "herdrpp", "--limit", "20"
-            )["logs"]
-            startup = next(
-                (
-                    log
-                    for log in logs
-                    if log.get("event") == "startup" and log["status"] != "running"
-                ),
-                None,
-            )
-            if startup is not None:
-                assert startup["status"] == "succeeded", startup
-                break
-            time.sleep(0.05)
-        else:
-            raise TimeoutError(f"Plugin startup did not finish: {logs}")
-        self.action("stop")
-        lock_path = next(
-            (self.directory / "state/herdr/plugins/herdrpp").glob(
-                "session-*/watch.lock"
-            )
-        )
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            with lock_path.open("r+") as lock:
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    return
-                except BlockingIOError:
-                    pass
-            time.sleep(0.05)
-        raise TimeoutError("Startup watcher did not release its session lock")
+        stop_startup_watcher(self.api, self.directory / "state/herdr/plugins/herdrpp")
 
     def wait_api(self, predicate, timeout=20):
         deadline = time.monotonic() + timeout

@@ -3,7 +3,11 @@
 Search open workspaces, worktrees, and tabs, and see GitHub pull request status
 beside each workspace in Herdr.
 
-![Workspace search](tests/snapshots/picker/baselines/showcase-dracula.png)
+![Workspace picker beside sidebar PR status: open, draft, and closed PRs each with passing, failing, and pending CI; merged PR and no-PR examples](tests/snapshots/picker/baselines/showcase-dracula.png)
+
+Workspace search alongside all nine open/draft/closed × passing/failing/pending
+combinations, plus a merged PR and a workspace without a PR. Open PRs are green,
+drafts gray, closed PRs red, and merged PRs purple; CI uses ✅, ❌, and 🟡.
 
 ## Installation
 

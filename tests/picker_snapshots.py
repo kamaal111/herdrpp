@@ -23,6 +23,7 @@ from unittest.mock import Mock, patch
 
 import pyte
 from PIL import Image, ImageChops, ImageDraw, ImageFont
+from snapshot_actions import completed_action, stop_startup_watcher
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = Path("/output")
@@ -34,6 +35,19 @@ CASES = (
     "empty-snapshot", "loading", "tiny-terminal", "tab-cycling",
 )
 CONTROLLED = {"empty-snapshot", "loading", "tiny-terminal"}
+SHOWCASE_PRS = (
+    (95, "open-passing", "OPEN", False, "SUCCESS", "pr_open", "238636", "✅"),
+    (96, "open-failing", "OPEN", False, "FAILURE", "pr_open", "238636", "❌"),
+    (97, "open-pending", "OPEN", False, "PENDING", "pr_open", "238636", "🟡"),
+    (98, "draft-passing", "OPEN", True, "SUCCESS", "pr_draft", "8b949e", "✅"),
+    (99, "draft-failing", "OPEN", True, "FAILURE", "pr_draft", "8b949e", "❌"),
+    (100, "draft-pending", "OPEN", True, "PENDING", "pr_draft", "8b949e", "🟡"),
+    (101, "closed-passing", "CLOSED", False, "SUCCESS", "pr_closed", "f85149", "✅"),
+    (102, "closed-failing", "CLOSED", False, "FAILURE", "pr_closed", "f85149", "❌"),
+    (103, "closed-pending", "CLOSED", False, "PENDING", "pr_closed", "f85149", "🟡"),
+    (104, "merged", "MERGED", False, "SUCCESS", "pr_merged", "a371f7", ""),
+)
+PR_TOKENS = ("pr_number", "pr_open", "pr_draft", "pr_closed", "pr_merged")
 ANSI = dict(zip(
     ("black", "red", "green", "brown", "blue", "magenta", "cyan", "white",
      "brightblack", "brightred", "brightgreen", "brightbrown", "brightblue",
@@ -61,6 +75,7 @@ def rasterize(grid, light=False):
     draw = ImageDraw.Draw(image)
     regular = ImageFont.truetype(str(FONTS / "DejaVuSansMono.ttf"), 16)
     bold = ImageFont.truetype(str(FONTS / "DejaVuSansMono-Bold.ttf"), 16)
+    emoji = ImageFont.truetype(str(FONTS / "NotoEmoji.ttf"), 16)
     for index, cell in enumerate(grid["cells"]):
         x, y = index % grid["width"] * 10, index // grid["width"] * 20
         fg, bg = color(cell["fg"], foreground), color(cell["bg"], background)
@@ -70,7 +85,8 @@ def rasterize(grid, light=False):
     for index, cell in enumerate(grid["cells"]):
         x, y = index % grid["width"] * 10, index // grid["width"] * 20
         fg = color(cell["bg"], background) if cell["reverse"] else color(cell["fg"], foreground)
-        draw.text((x, y + 1), cell["text"], font=bold if cell["bold"] else regular, fill=fg)
+        font = emoji if cell["text"] in ("✅", "❌", "🟡") else bold if cell["bold"] else regular
+        draw.text((x, y + 1), cell["text"], font=font, fill=fg)
         if cell["underline"]:
             draw.line((x, y + 18, x + 9, y + 18), fill=fg)
     return image
@@ -190,7 +206,7 @@ class Session:
         self.server = self.client = None
         self.log = None
         self.environment = {key: value for key, value in os.environ.items()
-                            if not key.startswith(("HERDR_", "XDG_", "GIT_"))
+                            if not key.startswith(("HERDR_", "XDG_", "GIT_", "GH_"))
                             and key not in ("ENV", "BASH_ENV", "NO_COLOR", "COLORTERM")}
         self.environment.update(
             XDG_CONFIG_HOME=str(directory / "config"),
@@ -216,6 +232,7 @@ class Session:
         config = Path(self.environment["HERDR_CONFIG_PATH"])
         config.parent.mkdir(parents=True)
         theme = "catppuccin-latte" if self.case == "light-search" else "dracula"
+        sidebar_width = "sidebar_width = 38\n" if self.case == "showcase-dracula" else ""
         config.write_text(f"""onboarding = false
 [theme]
 name = "{theme}"
@@ -227,7 +244,7 @@ shell_mode = "non_login"
 version_check = false
 manifest_check = false
 [ui]
-tab_bar_right = []
+{sidebar_width}tab_bar_right = []
 host_cursor = "native"
 [ui.toast]
 enabled = false
@@ -239,6 +256,9 @@ enabled = false
         shutil.copy(ROOT / "herdr-plugin.toml", plugin)
         shutil.copy(OUTPUT / "build/release/herdrpp", plugin / "target/release")
         self.run("herdr", "plugin", "link", str(plugin))
+        if self.case == "showcase-dracula":
+            self.run(str(plugin / "target/release/herdrpp"), "configure")
+            self.prepare_showcase_github()
         plugin_config = Path(self.run("herdr", "plugin", "config-dir", "herdrpp").strip())
         plugin_config.mkdir(parents=True, exist_ok=True)
         mode = "flat" if self.case == "flat-search" else "hierarchical"
@@ -249,7 +269,11 @@ enabled = false
             env=self.environment, stdout=self.log, stderr=self.log, start_new_session=True,
         )
         self.wait_ready()
-        self.seed()
+        if self.case == "showcase-dracula":
+            stop_startup_watcher(self.api, self.directory / "state/herdr/plugins/herdrpp")
+            self.seed_showcase()
+        else:
+            self.seed()
         width, height = {
             "narrow-search": (32, 20),
             "scrolled-selection": (160, 12),
@@ -257,6 +281,71 @@ enabled = false
         }.get(self.case, (160, 40))
         self.client = Client(self.environment, width, height, self.directory)
         self.client.wait("Codex", "$")
+        if self.case == "showcase-dracula":
+            completed = completed_action(self.api, "refresh")
+            assert "already in progress" not in (completed.get("stdout") or ""), completed
+            self.assert_showcase_metadata()
+            self.client.wait(*(f"#{case[0]}" for case in SHOWCASE_PRS))
+            self.assert_showcase_sidebar()
+
+    def prepare_showcase_github(self):
+        directory = self.directory / "bin"
+        directory.mkdir()
+        fixtures = []
+        for number, label, state, draft, check, _, _, _ in SHOWCASE_PRS:
+            fixtures.append(dict(
+                branch=label,
+                association=dict(number=number, created_at="2026-10-01T00:00:00Z",
+                                 state="closed" if state == "MERGED" else state.lower(),
+                                 head=dict(ref=label, repo=dict(full_name="snapshot/herdrpp"))),
+                details=dict(number=number, state=state, isDraft=draft,
+                             statusCheckRollup=[dict(__typename="StatusContext", state=check)]),
+            ))
+        (directory / "prs.json").write_text(json.dumps(fixtures))
+        fake = directory / "gh"
+        fake.write_text("""#!/usr/bin/env python3
+import json, pathlib, sys
+fixtures = json.loads(pathlib.Path(__file__).with_name("prs.json").read_text())
+args = sys.argv[1:]
+if args[:2] == ["repo", "view"]:
+    print(json.dumps({"nameWithOwner":"snapshot/herdrpp", "url":"https://github.com/snapshot/herdrpp"}))
+elif args[:2] == ["pr", "view"]:
+    print(json.dumps(next(case["details"] for case in fixtures if case["details"]["number"] == int(args[2]))))
+elif args[0] == "api":
+    print(json.dumps([case["association"] for case in fixtures if "head=snapshot:" + case["branch"] in args]))
+else:
+    sys.exit("Unexpected gh invocation: " + repr(args))
+""")
+        fake.chmod(0o755)
+        self.environment["PATH"] = str(directory) + os.pathsep + self.environment["PATH"]
+
+    def assert_showcase_metadata(self):
+        snapshot = self.api("api", "snapshot")["snapshot"]
+        workspaces = {workspace["label"]: workspace for workspace in snapshot["workspaces"]}
+        for number, label, _, _, _, token, _, icon in SHOWCASE_PRS:
+            tokens = workspaces[label]["tokens"]
+            assert tokens["pr_number"] == f"#{number}", (label, tokens)
+            assert tokens[token] == f"#{number} {icon}".rstrip(), (label, tokens)
+            assert [key for key in PR_TOKENS[1:] if key in tokens] == [token], (label, tokens)
+        assert not any(key in workspaces["no-pr"].get("tokens", {}) for key in PR_TOKENS)
+        assert not any(key in workspaces["herdrpp"].get("tokens", {}) for key in PR_TOKENS)
+
+    def assert_showcase_sidebar(self):
+        rows = [(y, line[:38]) for y, line in enumerate(self.client.screen.display)]
+        for number, label, _, _, _, _, expected_color, icon in SHOWCASE_PRS:
+            y, line = next((y, line) for y, line in rows if f"#{number}" in line)
+            assert label in line, (label, line)
+            column = line.index(f"#{number}")
+            assert [
+                self.client.screen.buffer[y][x].fg
+                for x in range(column, column + len(f"#{number}"))
+            ] == [expected_color] * len(f"#{number}"), (label, line)
+            assert [
+                symbol for symbol in ("✅", "❌", "🟡") if symbol in line
+            ] == ([icon] if icon else []), (label, line)
+        no_pr = next(line for _, line in rows if "no-pr" in line)
+        assert "#" not in no_pr, no_pr
+        assert not any(symbol in no_pr for symbol in ("✅", "❌", "🟡")), no_pr
 
     def wait_ready(self, timeout=15):
         deadline = time.monotonic() + timeout
@@ -284,7 +373,6 @@ enabled = false
             self.api("tab", "create", "--workspace", workspace, "--label", label, "--no-focus")
 
     def seed(self):
-        original = self.api("api", "snapshot")["snapshot"]["workspaces"]
         projects = (
             ("herdrpp", ("Codex", "Terminal", "Tests"), (
                 ("feature/search", ("Codex", "Tests")),
@@ -297,12 +385,34 @@ enabled = false
             )),
             ("dotfiles", ("Codex",), ()),
         )
+        snapshot = self.seed_projects(projects)
+        assert len(snapshot["workspaces"]) == 8, snapshot
+        assert len(snapshot["tabs"]) == 15, snapshot
+        assert sum(bool(w.get("worktree", {}).get("is_linked_worktree"))
+                   for w in snapshot["workspaces"]) == 5, snapshot
+
+    def seed_showcase(self):
+        projects = (
+            ("herdrpp", ("Codex", "Terminal", "Tests"),
+             tuple((case[1], ("Codex",)) for case in SHOWCASE_PRS)),
+            ("no-pr", ("Terminal",), ()),
+        )
+        snapshot = self.seed_projects(projects, "https://github.com/snapshot/herdrpp.git")
+        assert len(snapshot["workspaces"]) == 12, snapshot
+        assert len(snapshot["tabs"]) == 14, snapshot
+        assert sum(bool(w.get("worktree", {}).get("is_linked_worktree"))
+                   for w in snapshot["workspaces"]) == 10, snapshot
+
+    def seed_projects(self, projects, remote=None):
+        original = self.api("api", "snapshot")["snapshot"]["workspaces"]
         focus = None
         for name, tabs, worktrees in projects:
             repo = self.directory / name
             self.run("git", "init", "-b", "main", str(repo))
             self.run("git", "-C", str(repo), "-c", "user.name=Snapshot", "-c",
                      "user.email=snapshot@example.invalid", "commit", "--allow-empty", "-m", "Initial")
+            if remote is not None and name == "herdrpp":
+                self.run("git", "-C", str(repo), "remote", "add", "origin", remote)
             root = self.workspace(repo, name, tabs)
             if name == "herdrpp":
                 focus = root
@@ -316,10 +426,7 @@ enabled = false
         for workspace in original:
             self.api("workspace", "close", workspace["workspace_id"])
         snapshot = self.api("api", "snapshot")["snapshot"]
-        assert len(snapshot["workspaces"]) == 8, snapshot
-        assert len(snapshot["tabs"]) == 15, snapshot
-        assert sum(bool(w.get("worktree", {}).get("is_linked_worktree"))
-                   for w in snapshot["workspaces"]) == 5, snapshot
+        return snapshot
 
     def open_picker(self):
         self.run("herdr", "--session", "snapshot", "plugin", "action", "invoke", "herdrpp.open")
@@ -327,6 +434,10 @@ enabled = false
 
     def capture(self):
         self.open_picker()
+        if self.case == "showcase-dracula":
+            grid = self.client.wait("12 results", "no-pr", *(case[1] for case in SHOWCASE_PRS))
+            self.assert_showcase_sidebar()
+            return grid
         if self.case == "hierarchical-unfiltered":
             return self.client.wait("docs/readme", "results")
         if self.case == "scrolled-selection":
