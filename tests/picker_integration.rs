@@ -298,6 +298,8 @@ fn distributable_manifest_declares_action_and_popup_entrypoints() {
     assert_eq!(manifest["actions"][2]["id"].as_str(), Some("refresh"));
     assert_eq!(manifest["actions"][3]["id"].as_str(), Some("stop"));
     assert_eq!(manifest["panes"][0]["placement"].as_str(), Some("popup"));
+    assert_eq!(manifest["panes"][0]["width"].as_str(), Some("100%"));
+    assert_eq!(manifest["panes"][0]["height"].as_str(), Some("100%"));
     assert_eq!(manifest["actions"][0]["command"][1].as_str(), Some("open"));
     assert_eq!(manifest["panes"][0]["command"][1].as_str(), Some("pick"));
     assert_eq!(

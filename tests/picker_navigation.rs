@@ -408,7 +408,7 @@ fn draw_app(app: &mut App, width: u16, height: u16) {
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
     terminal
-        .draw(|frame| herdrpp::picker::ui::render(frame, app))
+        .draw(|frame| herdrpp::picker::ui::render_content(frame, app, frame.area()))
         .unwrap();
 }
 
@@ -417,7 +417,7 @@ fn drawn_app(width: u16, height: u16) -> App {
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
     terminal
-        .draw(|frame| herdrpp::picker::ui::render(frame, &mut app))
+        .draw(|frame| herdrpp::picker::ui::render_content(frame, &mut app, frame.area()))
         .unwrap();
     app
 }
@@ -526,7 +526,7 @@ fn resize_clears_old_button_hits_and_keeps_compact_cancel() {
     let mut app = drawn_app(80, 20);
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(14, 10)).unwrap();
     terminal
-        .draw(|frame| herdrpp::picker::ui::render(frame, &mut app))
+        .draw(|frame| herdrpp::picker::ui::render_content(frame, &mut app, frame.area()))
         .unwrap();
     assert_eq!(app.ok_area, Rect::default());
     assert_eq!(app.cancel_area, Rect::new(3, 9, 8, 1));

@@ -141,14 +141,18 @@ mode values are errors. See [plugin settings](examples/config.toml).
 Selecting a workspace restores its remembered tab and pane; selecting a tab
 focuses it explicitly. Up/down clears tab selection and stops at the first or
 last workspace row. `●` marks the active destination; `›` marks selection.
-Enter does nothing without results. Outside clicks are ignored.
+Enter does nothing without results. Left-click the backdrop outside the picker
+to cancel, including while workspaces are loading. Cancellation keeps the
+original focus and does not activate controls underneath.
 
 The picker follows Herdr's saved theme, custom colors, and terminal appearance
 reports. Reopen after saving theme changes. Unsaved Settings previews are
 unavailable. Palette compatibility is based on Herdr 0.9.5.
 
-The popup is centered, 80% wide, and at most 22 rows tall. It searches open
-destinations in the selected local session, fetching them once per opening.
+The picker is centered, 80% wide, and at most 22 rows tall on a theme-colored
+backdrop over the terminal area while open. The Herdr sidebar remains visible.
+No Herdr configuration changes are needed. It searches open destinations in the
+selected local session, fetching them once per opening.
 The current workspace group appears first, followed by Herdr's workspace
 order; initial selection is the first other workspace. There is no MRU history
 or branch-label search. Reopen to discover changed destinations.
