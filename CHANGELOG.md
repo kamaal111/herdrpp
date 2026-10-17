@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/kamaal111/herdrpp/compare/v0.1.2...v0.2.0) (2026-10-17)
+
+
+### Features
+
+* **picker:** select the strongest match and preview destination tabs ([1af5e7d](https://github.com/kamaal111/herdrpp/commit/1af5e7dfde0ff8b8087df93d873f5dca6b50c611))
+
 ## [0.1.2](https://github.com/kamaal111/herdrpp/compare/v0.1.1...v0.1.2) (2026-10-17)
 
 
