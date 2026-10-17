@@ -5,7 +5,7 @@ use nucleo_matcher::{
 
 use crate::picker::{
     config::SearchMode,
-    model::{Snapshot, Target, Workspace},
+    model::{Snapshot, Tab, Target, Workspace},
     ordering,
 };
 
@@ -33,7 +33,25 @@ pub struct Row {
     pub depth: usize,
     pub label_matches: Vec<usize>,
     pub score: u32,
+    pub matches_query: bool,
     pub active: bool,
+}
+
+impl Row {
+    fn tab(snapshot: &Snapshot, tab: &Tab, ancestors: Vec<Ancestor>) -> Self {
+        Self {
+            kind: RowKind::Tab,
+            target: Target::Tab(tab.tab_id.clone()),
+            workspace_id: tab.workspace_id.clone(),
+            label: tab.label.clone(),
+            depth: ancestors.len(),
+            ancestors,
+            label_matches: Vec::new(),
+            score: 0,
+            matches_query: false,
+            active: snapshot.focused_tab_id.as_ref() == Some(&tab.tab_id),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -70,23 +88,42 @@ impl Search {
                 .filter_map(|tab| {
                     rows.iter()
                         .find(|row| matches!(&row.target, Target::Tab(id) if id == &tab.tab_id))
-                        .map(|row| (tab.number, row.clone()))
+                        .cloned()
+                        .or_else(|| {
+                            (tab.tab_id == workspace.active_tab_id).then(|| {
+                                let mut ancestors = owner.ancestors.clone();
+                                for ancestor in &mut ancestors {
+                                    ancestor.matches.clear();
+                                }
+                                ancestors.push(Ancestor {
+                                    kind: owner.kind,
+                                    label: owner.label.clone(),
+                                    matches: Vec::new(),
+                                });
+                                Row::tab(snapshot, tab, ancestors)
+                            })
+                        })
+                        .map(|row| (tab.number, row))
                 })
                 .collect();
             tabs.sort_by_key(|(number, _)| *number);
+            if !query.trim().is_empty() {
+                tabs.sort_by_key(|(_, row)| std::cmp::Reverse((row.matches_query, row.score)));
+            }
             results.push(WorkspaceResult {
                 workspace: owner.clone(),
                 tabs: tabs.into_iter().map(|(_, row)| row).collect(),
             });
         }
-        if mode == SearchMode::Flat && !query.trim().is_empty() {
+        if !query.trim().is_empty() {
             results.sort_by_key(|result| {
                 std::cmp::Reverse(
                     result
                         .tabs
                         .iter()
-                        .map(|tab| tab.score)
-                        .chain(std::iter::once(result.workspace.score))
+                        .chain(std::iter::once(&result.workspace))
+                        .filter(|row| row.matches_query)
+                        .map(|row| row.score)
                         .max()
                         .unwrap_or(0),
                 )
@@ -166,6 +203,7 @@ impl Search {
         }
         row.label_matches.clone_from(&matches[row.depth]);
         row.score = score;
+        row.matches_query = true;
         true
     }
 
@@ -197,6 +235,7 @@ impl Search {
             depth: ancestors.len(),
             label_matches: Vec::new(),
             score: 0,
+            matches_query: false,
             active: snapshot.focused_workspace_id.as_ref() == Some(&workspace.workspace_id),
         };
         let matched = self.match_row(&mut row, terms);
@@ -208,17 +247,7 @@ impl Search {
         });
         let mut children = Vec::new();
         for tab in tabs {
-            let mut child = Row {
-                kind: RowKind::Tab,
-                target: Target::Tab(tab.tab_id.clone()),
-                workspace_id: workspace.workspace_id.clone(),
-                label: tab.label.clone(),
-                ancestors: child_ancestors.clone(),
-                depth: child_ancestors.len(),
-                label_matches: Vec::new(),
-                score: 0,
-                active: snapshot.focused_tab_id.as_ref() == Some(&tab.tab_id),
-            };
+            let mut child = Row::tab(snapshot, tab, child_ancestors.clone());
             if self.match_row(&mut child, terms) {
                 children.push(child);
             }

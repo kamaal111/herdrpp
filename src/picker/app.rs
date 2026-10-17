@@ -71,6 +71,29 @@ impl App {
         self.results = self.search.results(&self.snapshot, &self.query, self.mode);
         self.selected = (!self.results.is_empty()).then_some(0);
         self.selected_tab = None;
+        if !self.query.trim().is_empty() {
+            let best = self
+                .results
+                .iter()
+                .enumerate()
+                .flat_map(|(workspace, result)| {
+                    std::iter::once((workspace, None, &result.workspace)).chain(
+                        result
+                            .tabs
+                            .iter()
+                            .enumerate()
+                            .map(move |(tab, row)| (workspace, Some(tab), row)),
+                    )
+                })
+                .filter(|(_, _, row)| row.matches_query)
+                .enumerate()
+                .max_by_key(|(order, (_, tab, row))| {
+                    (row.score, tab.is_none(), std::cmp::Reverse(*order))
+                })
+                .map(|(_, (workspace, tab, _))| (workspace, tab));
+            self.selected = best.map(|(workspace, _)| workspace);
+            self.selected_tab = best.and_then(|(_, tab)| tab);
+        }
         self.result_hits.clear();
         self.offset = 0;
     }
@@ -91,6 +114,20 @@ impl App {
         }
     }
 
+    pub fn highlighted_tab(&self) -> Option<usize> {
+        let result = self.selected.and_then(|index| self.results.get(index))?;
+        self.selected_tab.or_else(|| {
+            let workspace = self
+                .snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == result.workspace.workspace_id)?;
+            result.tabs.iter().position(
+                |tab| matches!(&tab.target, Target::Tab(id) if id == &workspace.active_tab_id),
+            )
+        })
+    }
+
     fn navigate_tab(&mut self, delta: isize) {
         let Some(result) = self.selected.and_then(|index| self.results.get(index)) else {
             return;
@@ -99,7 +136,7 @@ impl App {
         if count == 0 {
             return;
         }
-        self.selected_tab = Some(match self.selected_tab {
+        self.selected_tab = Some(match self.highlighted_tab() {
             Some(index) => (index as isize + delta).rem_euclid(count as isize) as usize,
             None if delta > 0 => 0,
             None => count - 1,
