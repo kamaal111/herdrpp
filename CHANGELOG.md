@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/kamaal111/herdrpp/compare/v0.2.0...v0.3.0) (2026-10-17)
+
+
+### Features
+
+* **palette:** add searchable Herdr commands on Cmd+Shift+K ([f8a1814](https://github.com/kamaal111/herdrpp/commit/f8a18149e36fd10e11fbb495578a1f267d65566b))
+
 ## [0.2.0](https://github.com/kamaal111/herdrpp/compare/v0.1.2...v0.2.0) (2026-10-17)
 
 
