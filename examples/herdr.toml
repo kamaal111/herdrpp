@@ -18,3 +18,9 @@ key = "cmd+p"
 type = "plugin_action"
 command = "herdrpp.open"
 description = "Search workspaces, worktrees and tabs"
+
+[[keys.command]]
+key = "cmd+shift+k"
+type = "plugin_action"
+command = "herdrpp.commands"
+description = "Open command palette"

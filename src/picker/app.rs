@@ -144,15 +144,12 @@ impl App {
     }
 
     pub fn ensure_visible(&mut self, height: usize) {
-        if let Some(selected) = self.selected {
-            if selected < self.offset {
-                self.offset = selected;
-            }
-            if height > 0 && selected >= self.offset + height {
-                self.offset = selected + 1 - height;
-            }
-        }
-        self.offset = self.offset.min(self.results.len().saturating_sub(height));
+        self.offset = crate::search::view::visible_offset(
+            self.selected,
+            self.offset,
+            self.results.len(),
+            height,
+        );
     }
 
     fn activate(&self) -> Action {

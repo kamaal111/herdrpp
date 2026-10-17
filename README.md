@@ -20,14 +20,14 @@ curl -fsSL https://raw.githubusercontent.com/kamaal111/herdrpp/main/install.sh |
 ```
 
 The installer installs the latest stable release at its exact tag, initializes
-PR sidebar tokens and an available Cmd+P shortcut, and requests watcher startup
+PR sidebar tokens and available Cmd+P and Cmd+Shift+K shortcuts, and requests watcher startup
 when a session is running. Authenticate `gh` on the server with `gh auth login`.
-Then select **Reload config** in the viewing client's menu. If Cmd+P is already
+Then select **Reload config** in the viewing client's menu. If either shortcut is already
 bound, setup preserves it and reports how to add another shortcut.
 
 Rerun the same command to update to the latest release. Setup is recorded once
-per resolved config path outside the plugin installation. Later installs leave
-your configuration untouched, including intentional edits or removals. The
+per resolved config path outside the plugin installation. Later installs apply only new targeted setup migrations and preserve
+intentional edits or removals from completed migrations. The
 public installer requires the first GitHub Release to have been published.
 
 ### Separate server and viewing computer
@@ -80,6 +80,12 @@ key = "cmd+p"
 type = "plugin_action"
 command = "herdrpp.open"
 description = "Search workspaces, worktrees and tabs"
+
+[[keys.command]]
+key = "cmd+shift+k"
+type = "plugin_action"
+command = "herdrpp.commands"
+description = "Open command palette"
 
 [ui.sidebar.spaces]
 rows = [
@@ -158,6 +164,43 @@ destinations in the selected local session, fetching them once per opening.
 Without a search, the current workspace group appears first, followed by
 Herdr's workspace order; initial selection is the first other workspace. There
 is no MRU history or branch-label search. Reopen to discover changed destinations.
+
+## Command palette
+
+Press **Cmd+Shift+K** to search commands, or invoke
+`herdr plugin action invoke herdrpp.commands`. Ghostty's Cmd+Shift+P remains
+available for its own palette. After installation, select **Reload config**
+in the viewing client. If your terminal reserves the chord, configure
+`key = "prefix+shift+f"` instead (default Ctrl+B, then Shift+F).
+
+The command palette uses the workspace picker's shared search algorithm and
+search view: case-insensitive fuzzy matching, all whitespace-separated terms
+required, immediate filtering, score ranking, and highlighted matching letters.
+Search command titles, descriptions, plugin names, or qualified action IDs.
+Empty searches show commands alphabetically; there is no command history.
+
+Built-ins include workspace search; creating, renaming, and closing workspaces
+or tabs; renaming and closing panes; splitting right/down; focusing neighboring
+panes; and toggling zoom. Enabled plugin actions appear alongside them, filtered
+by platform and available invocation context. Custom `[[keys.command]]` entries
+and client-only actions such as Settings, Help, and Toggle Sidebar are outside
+this version's coverage. Discovery failures leave built-ins available with a
+warning; reopen to refresh the catalog.
+
+Type or paste to filter, use ↑/↓ or Ctrl+P/N, and press Enter or click a result
+to run it. Rename commands ask for a nonblank name. Close commands require
+confirmation. Escape returns from a prompt or closes the palette; Ctrl+C cancels.
+Commands target the workspace, tab, and pane that opened the palette. A missing
+original target produces an error rather than switching to another target.
+Plugin actions are requested asynchronously; use Herdr's plugin logs to confirm
+completion. The palette uses the same compact native popup as workspace search:
+80% wide and at most 22 rows, keeping the surrounding terminal visible. It closes before
+dispatch so another action can open a popup, including the workspace picker.
+
+Setup version 2 adds only the Cmd+Shift+K binding to installations that already
+completed version 1. It preserves removed sidebar tokens and Cmd+P bindings.
+Subsequent installs do not restore a deliberately removed palette shortcut.
+Existing conflicting shortcuts are preserved and reported for manual setup.
 
 ## Pull request status
 

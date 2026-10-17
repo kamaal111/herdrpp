@@ -132,7 +132,52 @@ def case(
             os.close(slave)
 
 
+def palette_case(keys, expected, loading=False):
+    with tempfile.TemporaryDirectory(prefix="herdrpp-palette-pty-") as directory:
+        directory = Path(directory)
+        catalog = dict(context={}, warning=None, items=[dict(
+            id="herdr:split_right", title="Split Pane Right", source="Herdr",
+            description="", command={"Split":"Right"},
+        )])
+        if not loading:
+            (directory / "catalog.json").write_text(json.dumps(catalog))
+        config = directory / "herdr.toml"
+        config.write_text("[theme]\nname='dracula'\n")
+        master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 20, 80, 0, 0))
+        before = termios.tcgetattr(slave)
+        environment = dict(os.environ, HERDRPP_PALETTE_REQUEST=str(directory),
+                           HERDR_CONFIG_PATH=str(config), TERM="xterm-256color")
+        process = subprocess.Popen([str(BINARY), "pick-command"], stdin=slave,
+                                   stdout=slave, stderr=slave, env=environment,
+                                   start_new_session=True)
+        try:
+            output = read_until(master, b"Loading commands" if loading else b"Search commands")
+            os.write(master, keys)
+            deadline = time.monotonic() + 5
+            with selectors.DefaultSelector() as selector:
+                selector.register(master, selectors.EVENT_READ)
+                while not (directory / "selection.json").exists():
+                    assert time.monotonic() < deadline, output[-1000:]
+                    if selector.select(0.05):
+                        output += os.read(master, 65536)
+                while selector.select(0.05):
+                    output += os.read(master, 65536)
+            assert json.loads((directory / "selection.json").read_text()) == expected
+            assert b"\x1b[?1000l" in output
+            assert b"\x1b[?2004l" in output
+            assert termios.tcgetattr(slave) == before
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+            os.close(master)
+            os.close(slave)
+
+
 def main():
+    palette_case(b"spl rgt\r", dict(id="herdr:split_right", input=None, confirmed=False))
+    palette_case(b"\x1b", None)
+    palette_case(b"\x1b", None, loading=True)
     case(b"\x1b")
     case(b"\x1b", loading=True)
     case(b"col\x1b")
@@ -199,7 +244,7 @@ def main():
         expected=[["tab", "focus", "w3:t1"]],
     )
     print(
-        "28 PTY smoke scenarios passed (Escape including slow discovery, filtering, workspace/tab focus, nested worktrees, flat mode, failure recovery; resize and terminal cleanup)"
+        "31 PTY smoke scenarios passed (Escape including slow discovery, filtering, workspace/tab focus, nested worktrees, flat mode, failure recovery; resize and terminal cleanup)"
     )
 
 

@@ -46,11 +46,20 @@ README example. `pick` and `watch` are internal lifecycle commands.
 
 ## Architecture
 
-One executable dispatches picker and PR commands. `src/picker` owns search,
+One executable dispatches picker, palette, and PR commands. `src/picker` owns search,
 navigation, rendering, and saved-theme support. `src/pr` owns GitHub association,
 metadata reporting, and watcher lifecycle. The shared command runner owns
 bounded subprocess I/O, process-group cleanup, timeout, and cancellation.
 Feature snapshots retain the distinct validation they need.
+
+`src/search` owns the shared fuzzy field matcher and search-view components.
+The picker retains hierarchy and destination ordering; `src/palette` builds a
+flat command catalog and handles prompts. Both call the same matcher and view.
+The palette uses the same native popup placement, geometry, and launch helper
+as the picker. It exits after writing a selection to a private temporary mailbox;
+the action waits for the popup PTY to be released before dispatching against the
+opening context.
+Plugin actions use the public session socket API to retain that context.
 
 Plugin settings have feature sections, starting with `[picker]`. Extend this
 schema with explicit settings when adding a feature; unknown settings are errors.
@@ -77,7 +86,9 @@ adds sidebar tokens and an available Cmd+P binding in one atomic change.
 Conflicting shortcuts are preserved and reported for manual resolution.
 Completion, locks, and original backups live under
 `${XDG_STATE_HOME:-$HOME/.local/state}/herdrpp/configs/`, keyed by resolved path.
-Once completed, setup does not reapply after user edits or deletion.
+Version 2 adds only the available Cmd+Shift+K palette binding. Each completed
+migration stays complete after user edits or deletion; upgrades run only pending
+migrations and keep per-migration backups.
 
 Advance the setup version only for an ordered, targeted change in required
 configuration, never for ordinary releases or restoring user customizations.

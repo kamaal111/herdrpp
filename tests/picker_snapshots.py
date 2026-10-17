@@ -33,8 +33,10 @@ CASES = (
     "showcase-dracula", "hierarchical-unfiltered", "flat-search", "no-matches",
     "narrow-search", "scrolled-selection", "light-search",
     "empty-snapshot", "loading", "tiny-terminal", "tab-cycling",
+    "palette-popup", "palette-search", "palette-empty", "palette-rename", "palette-confirm", "palette-narrow", "palette-loading",
 )
-CONTROLLED = {"empty-snapshot", "loading", "tiny-terminal"}
+CONTROLLED = {"empty-snapshot", "loading", "tiny-terminal",
+              "palette-search", "palette-empty", "palette-rename", "palette-confirm", "palette-narrow", "palette-loading"}
 SHOWCASE_PRS = (
     (95, "open-passing", "OPEN", False, "SUCCESS", "pr_open", "238636", "✅"),
     (96, "open-failing", "OPEN", False, "FAILURE", "pr_open", "238636", "❌"),
@@ -433,6 +435,16 @@ else:
         return self.client.wait("results", "Esc Cancel")
 
     def capture(self):
+        if self.case == "palette-popup":
+            before = self.api("api", "snapshot")["snapshot"]
+            self.api("plugin", "action", "invoke", "herdrpp.commands")
+            self.client.wait("Search commands", "Command Palette")
+            self.client.send(b"spl rgt")
+            grid = self.client.wait("> spl rgt", "Split Pane Right", "1 results", "$")
+            after = self.api("api", "snapshot")["snapshot"]
+            assert focus_state(after) == focus_state(before)
+            assert layout_state(after) == layout_state(before)
+            return grid
         self.open_picker()
         if self.case == "showcase-dracula":
             grid = self.client.wait("12 results", "no-pr", *(case[1] for case in SHOWCASE_PRS))
@@ -756,6 +768,74 @@ class FocusTests(unittest.TestCase):
         after = self.finish(b"\r", self.origin)
         self.assertNotIn(target[1], [tab["tab_id"] for tab in after["tabs"]])
         self.assertEqual(focus_state(after), self.origin)
+
+    def open_commands(self, query):
+        self.before = self.snapshot()
+        invocation = self.session.api("plugin", "action", "invoke", "herdrpp.commands")
+        self.command_log = invocation["log"]["log_id"]
+        self.session.client.wait("Search commands", "Command Palette")
+        self.session.client.send(query.encode())
+        self.session.client.wait(f"> {query}", "results")
+
+    def wait_command(self):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            logs = self.session.api("plugin", "log", "list", "--plugin", "herdrpp", "--limit", "20")["logs"]
+            completed = next((log for log in logs if log["log_id"] == self.command_log and log["status"] != "running"), None)
+            if completed is not None:
+                self.assertEqual(completed["status"], "succeeded", completed)
+                return completed
+            time.sleep(0.05)
+        self.fail(f"Palette action did not complete: {logs}")
+
+    def test_command_palette_reuses_compact_popup_and_keeps_terminal_visible(self):
+        self.session.run("herdr", "--session", "snapshot", "pane", "send-text", self.origin[2],
+                         "printf 'terminal-%s-visible\\n' 'around-palette'")
+        self.session.run("herdr", "--session", "snapshot", "pane", "send-keys", self.origin[2], "enter")
+        self.session.client.wait("terminal-around-palette-visible")
+        self.open_commands("Split Pane Right")
+        self.assertIn("terminal-around-palette-visible", "\n".join(self.session.client.screen.display))
+        self.assertEqual(focus_state(self.snapshot()), self.origin)
+        self.assertEqual(layout_state(self.snapshot()), layout_state(self.before))
+        after = self.finish(b"\x1b", self.origin)
+        self.wait_command()
+        self.assertEqual(focus_state(after), self.origin)
+
+    def test_command_palette_cancel_restores_original_focus_and_layout(self):
+        self.open_commands("split right")
+        after = self.finish(b"\x1b", self.origin)
+        self.wait_command()
+        self.assertEqual(focus_state(after), self.origin)
+
+    def test_command_palette_renames_original_tab(self):
+        self.open_commands("Rename Tab")
+        self.session.client.send(b"\r")
+        self.session.client.wait("Enter a name", "Rename Tab")
+        self.session.client.send("--世界 Review\r".encode())
+        self.wait_command()
+        after = self.finish(b"", self.origin)
+        self.wait_command()
+        renamed = next(tab for tab in after["tabs"] if tab["tab_id"] == self.origin[1])
+        self.assertEqual(renamed["label"], "--世界 Review")
+        self.assertEqual(focus_state(after), self.origin)
+
+    def test_command_palette_hands_off_to_workspace_picker_popup(self):
+        self.open_commands("herdrpp.open")
+        self.session.client.send(b"\r")
+        self.session.client.wait("Search workspaces, worktrees and tabs", absent=("Command Palette",))
+        self.wait_command()
+        after = self.finish(b"\x1b", self.origin)
+        self.assertEqual(focus_state(after), self.origin)
+
+    def test_command_palette_split_targets_original_pane_once(self):
+        self.open_commands("Split Pane Right")
+        self.session.client.send(b"\r")
+        self.session.client.wait("$", absent=("Command Palette", "Esc Cancel"))
+        self.wait_command()
+        after = self.snapshot()
+        self.assertEqual(len(after["panes"]), len(self.before["panes"]) + 1)
+        self.assertEqual(after["focused_tab_id"], self.origin[1])
+        self.assertNotEqual(after["focused_pane_id"], self.origin[2])
 
 
 def main():

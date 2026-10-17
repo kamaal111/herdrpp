@@ -5,3 +5,6 @@ pub mod pr;
 
 pub const PLUGIN_ID: &str = "herdrpp";
 pub const DISPLAY_NAME: &str = "herdr++";
+
+pub mod palette;
+pub mod search;

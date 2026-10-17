@@ -1,7 +1,4 @@
-use nucleo_matcher::{
-    Matcher, Utf32Str,
-    pattern::{Atom, AtomKind, CaseMatching, Normalization},
-};
+use crate::search::matcher::{FieldMatcher, Query};
 
 use crate::picker::{
     config::SearchMode,
@@ -62,8 +59,7 @@ pub struct WorkspaceResult {
 
 #[derive(Default)]
 pub struct Search {
-    matcher: Matcher,
-    buffer: Vec<char>,
+    matcher: FieldMatcher,
 }
 
 impl Search {
@@ -132,77 +128,21 @@ impl Search {
         results
     }
 
-    fn matched(&mut self, label: &str, term: &Atom) -> Option<(u32, Vec<usize>)> {
-        self.buffer.clear();
-        self.buffer.extend(label.chars());
-        let haystack = Utf32Str::Unicode(&self.buffer);
-        let mut indices = Vec::new();
-        let score = term.indices(haystack, &mut self.matcher, &mut indices)?;
-        Some((
-            u32::from(score),
-            indices.into_iter().map(|i| i as usize).collect(),
-        ))
-    }
-
-    fn match_row(&mut self, row: &mut Row, terms: &[Atom]) -> bool {
+    fn match_row(&mut self, row: &mut Row, query: &Query) -> bool {
         let labels: Vec<_> = row
             .ancestors
             .iter()
             .map(|ancestor| ancestor.label.as_str())
             .chain(std::iter::once(row.label.as_str()))
             .collect();
-        let mut matches = vec![Vec::new(); labels.len()];
-        let mut score = 0;
-        let mut joined_labels = None;
-        for term in terms {
-            let best = labels
-                .iter()
-                .enumerate()
-                .filter_map(|(level, label)| {
-                    self.matched(label, term)
-                        .map(|(score, indices)| (score, level, indices))
-                })
-                .max_by_key(|(score, level, _)| (*score, *level));
-            if let Some((term_score, level, indices)) = best {
-                score += term_score;
-                matches[level].extend(indices);
-                continue;
-            }
-            let (joined, ranges) = joined_labels.get_or_insert_with(|| {
-                let mut start = 0;
-                let ranges: Vec<_> = labels
-                    .iter()
-                    .map(|label| {
-                        let end = start + label.chars().count();
-                        let range = start..end;
-                        start = end + 1;
-                        range
-                    })
-                    .collect();
-                (labels.join(" "), ranges)
-            });
-            let Some((term_score, indices)) = self.matched(joined, term) else {
-                return false;
-            };
-            score += term_score;
-            for (level, range) in ranges.iter().enumerate() {
-                matches[level].extend(
-                    indices
-                        .iter()
-                        .filter(|index| range.contains(index))
-                        .map(|index| index - range.start),
-                );
-            }
-        }
-        for indices in &mut matches {
-            indices.sort_unstable();
-            indices.dedup();
-        }
-        for (ancestor, indices) in row.ancestors.iter_mut().zip(&matches) {
+        let Some(found) = self.matcher.matches(&labels, query) else {
+            return false;
+        };
+        for (ancestor, indices) in row.ancestors.iter_mut().zip(&found.indices) {
             ancestor.matches.clone_from(indices);
         }
-        row.label_matches.clone_from(&matches[row.depth]);
-        row.score = score;
+        row.label_matches.clone_from(&found.indices[row.depth]);
+        row.score = found.score;
         row.matches_query = true;
         true
     }
@@ -213,7 +153,7 @@ impl Search {
         workspace: &Workspace,
         worktrees: &[&Workspace],
         ancestors: &[Ancestor],
-        terms: &[Atom],
+        terms: &Query,
         mode: SearchMode,
     ) -> (Vec<Row>, Vec<Row>) {
         let tabs: Vec<_> = snapshot
@@ -288,18 +228,7 @@ impl Search {
     }
 
     pub fn rows(&mut self, snapshot: &Snapshot, query: &str, mode: SearchMode) -> Vec<Row> {
-        let terms: Vec<_> = query
-            .split_whitespace()
-            .map(|term| {
-                Atom::new(
-                    term,
-                    CaseMatching::Ignore,
-                    Normalization::Smart,
-                    AtomKind::Fuzzy,
-                    false,
-                )
-            })
-            .collect();
+        let terms = Query::new(query);
         let mut rows = Vec::new();
         let mut context_owners = Vec::new();
         for group in ordering::groups(snapshot) {
