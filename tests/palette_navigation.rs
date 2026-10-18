@@ -1,4 +1,5 @@
 use herdrpp::{
+    palette::naming::Naming,
     palette::{
         app::{Action, App, Mode},
         catalog::{self, Context},
@@ -20,6 +21,13 @@ fn app() -> App {
     App::new(
         context.clone(),
         catalog::builtins(&context),
+        Naming {
+            tab_name: "Codex".into(),
+            workspace_name: "herdrpp".into(),
+            pane_name: "Terminal".into(),
+            tab_suggestion: "3".into(),
+            ..Naming::default()
+        },
         Theme::default(),
         None,
     )
@@ -100,10 +108,11 @@ fn clear_shortcuts_clear_rename_input_and_validation_error_without_leaving_promp
         );
         assert_eq!(
             app.mode,
-            Mode::Rename {
+            Mode::Name {
                 item,
                 input: String::new(),
-                error: false
+                error: false,
+                selected: false
             }
         );
         assert_eq!(app.query, "Rename Tab");
@@ -112,10 +121,11 @@ fn clear_shortcuts_clear_rename_input_and_validation_error_without_leaving_promp
         app.handle(Event::Key(KeyEvent::new(code, modifiers)));
         assert_eq!(
             app.mode,
-            Mode::Rename {
+            Mode::Name {
                 item,
                 input: String::new(),
-                error: false
+                error: false,
+                selected: false
             }
         );
         app.handle(Event::Paste("New name".into()));
@@ -170,6 +180,10 @@ fn rename_rejects_blank_input_preserves_literal_unicode_and_escape_returns_to_re
     let mut app = app();
     app.set_query("Rename Tab".into());
     app.handle(key(KeyCode::Enter));
+    app.handle(Event::Key(KeyEvent::new(
+        KeyCode::Char('u'),
+        KeyModifiers::CONTROL,
+    )));
     assert_eq!(app.handle(key(KeyCode::Enter)), Action::Continue);
     assert!(draw(&mut app, 80, 20).contains("Enter a nonblank name"));
     app.handle(Event::Paste("--世界 Review".into()));
@@ -257,5 +271,150 @@ fn navigation_clamps_scrolls_and_ctrl_c_cancels_a_prompt() {
             KeyModifiers::CONTROL
         ))),
         Action::Cancel
+    );
+}
+
+#[test]
+fn rename_prompts_prefill_each_existing_name_and_append_edits() {
+    for (query, name) in [
+        ("Rename Workspace", "herdrpp"),
+        ("Rename Tab", "Codex"),
+        ("Rename Pane", "Terminal"),
+    ] {
+        let mut app = app();
+        app.set_query(query.into());
+        let item = app.results[0].item;
+        assert_eq!(app.handle(key(KeyCode::Enter)), Action::Continue);
+        assert_eq!(
+            app.mode,
+            Mode::Name {
+                item,
+                input: name.into(),
+                error: false,
+                selected: false
+            }
+        );
+        assert!(draw(&mut app, 80, 20).contains(&format!("> {name}")));
+        app.handle(Event::Paste(" Review".into()));
+        assert_eq!(
+            app.handle(key(KeyCode::Enter)),
+            Action::Execute(herdrpp::palette::app::Selection {
+                id: app.items[item].id.clone(),
+                input: Some(format!("{name} Review")),
+                confirmed: false,
+            })
+        );
+    }
+}
+
+#[test]
+fn unnamed_pane_prompt_never_uses_its_id_as_a_name() {
+    let mut app = app();
+    app.naming.pane_name.clear();
+    app.set_query("Rename Pane".into());
+    app.handle(key(KeyCode::Enter));
+    assert!(draw(&mut app, 80, 20).contains("Enter a name"));
+    assert!(!draw(&mut app, 80, 20).contains("w2:p8"));
+}
+
+#[test]
+fn creation_prompts_select_suggestions_and_typing_or_paste_replaces_them() {
+    for (query, suggestion) in [("New Tab", "3"), ("New Workspace", "workspace")] {
+        let mut app = app();
+        app.set_query(query.into());
+        let item = app.results[0].item;
+        assert_eq!(app.handle(key(KeyCode::Enter)), Action::Continue);
+        assert_eq!(
+            app.mode,
+            Mode::Name {
+                item,
+                input: suggestion.into(),
+                error: false,
+                selected: true
+            }
+        );
+        assert!(draw(&mut app, 80, 20).contains("Enter Create"));
+        app.handle(key(KeyCode::Char('R')));
+        app.handle(Event::Paste("eview".into()));
+        assert_eq!(
+            app.handle(key(KeyCode::Enter)),
+            Action::Execute(herdrpp::palette::app::Selection {
+                id: app.items[item].id.clone(),
+                input: Some("Review".into()),
+                confirmed: false,
+            })
+        );
+        app.handle(key(KeyCode::Esc));
+        app.handle(key(KeyCode::Enter));
+        app.handle(Event::Paste("--世界 Review".into()));
+        assert_eq!(
+            app.handle(key(KeyCode::Enter)),
+            Action::Execute(herdrpp::palette::app::Selection {
+                id: app.items[item].id.clone(),
+                input: Some("--世界 Review".into()),
+                confirmed: false,
+            })
+        );
+    }
+}
+
+#[test]
+fn creation_accepts_default_or_blank_and_escape_restores_results() {
+    let mut app = app();
+    app.set_query("New Tab".into());
+    app.handle(key(KeyCode::Enter));
+    assert_eq!(
+        app.handle(key(KeyCode::Enter)),
+        Action::Execute(herdrpp::palette::app::Selection {
+            id: "herdr:tab_create".into(),
+            input: Some("3".into()),
+            confirmed: false,
+        })
+    );
+    app.handle(key(KeyCode::Backspace));
+    assert_eq!(
+        app.handle(key(KeyCode::Enter)),
+        Action::Execute(herdrpp::palette::app::Selection {
+            id: "herdr:tab_create".into(),
+            input: Some(String::new()),
+            confirmed: false,
+        })
+    );
+    assert_eq!(app.handle(key(KeyCode::Esc)), Action::Continue);
+    assert_eq!(app.mode, Mode::Search);
+    assert_eq!(app.query, "New Tab");
+    assert_eq!(app.handle(key(KeyCode::Esc)), Action::Cancel);
+}
+
+#[test]
+fn mouse_opens_creation_prompt_and_ok_submits_its_name() {
+    let mut app = app();
+    app.set_query("New Tab".into());
+    draw(&mut app, 80, 20);
+    let row = app.hits[0].0;
+    assert_eq!(
+        app.handle(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: row.x,
+            row: row.y,
+            modifiers: KeyModifiers::NONE,
+        })),
+        Action::Continue
+    );
+    app.handle(Event::Paste("Review".into()));
+    draw(&mut app, 80, 20);
+    let ok = app.ok_area;
+    assert_eq!(
+        app.handle(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: ok.x,
+            row: ok.y,
+            modifiers: KeyModifiers::NONE,
+        })),
+        Action::Execute(herdrpp::palette::app::Selection {
+            id: "herdr:tab_create".into(),
+            input: Some("Review".into()),
+            confirmed: false,
+        })
     );
 }

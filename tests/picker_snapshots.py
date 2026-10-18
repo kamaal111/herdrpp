@@ -33,10 +33,10 @@ CASES = (
     "showcase-dracula", "hierarchical-unfiltered", "flat-search", "no-matches",
     "narrow-search", "scrolled-selection", "light-search",
     "empty-snapshot", "loading", "tiny-terminal", "tab-cycling",
-    "palette-popup", "palette-search", "palette-empty", "palette-rename", "palette-confirm", "palette-narrow", "palette-loading",
+    "palette-popup", "palette-search", "palette-empty", "palette-rename", "palette-create", "palette-confirm", "palette-narrow", "palette-loading",
 )
 CONTROLLED = {"empty-snapshot", "loading", "tiny-terminal",
-              "palette-search", "palette-empty", "palette-rename", "palette-confirm", "palette-narrow", "palette-loading"}
+              "palette-search", "palette-empty", "palette-rename", "palette-create", "palette-confirm", "palette-narrow", "palette-loading"}
 SHOWCASE_PRS = (
     (95, "open-passing", "OPEN", False, "SUCCESS", "pr_open", "238636", "✅"),
     (96, "open-failing", "OPEN", False, "FAILURE", "pr_open", "238636", "❌"),
@@ -840,8 +840,9 @@ class FocusTests(unittest.TestCase):
     def test_command_palette_renames_original_tab(self):
         self.open_commands("Rename Tab")
         self.session.client.send(b"\r")
-        self.session.client.wait("Enter a name", "Rename Tab")
-        self.session.client.send(b"discard this name")
+        original = next(tab["label"] for tab in self.before["tabs"] if tab["tab_id"] == self.origin[1])
+        self.session.client.wait("> " + original, "Rename Tab")
+        self.session.client.send(b"\x15discard this name")
         self.session.client.wait("> discard this name")
         self.session.client.send(b"\x15")
         self.session.client.wait("Enter a name", absent=("> discard this name",))
@@ -852,6 +853,46 @@ class FocusTests(unittest.TestCase):
         renamed = next(tab for tab in after["tabs"] if tab["tab_id"] == self.origin[1])
         self.assertEqual(renamed["label"], "--世界 Review")
         self.assertEqual(focus_state(after), self.origin)
+
+    def test_command_palette_new_tab_prompts_before_creating_and_focuses_named_tab(self):
+        self.open_commands("New Tab")
+        self.session.client.send(b"\r")
+        self.session.client.wait("New Tab", "Enter Create")
+        self.assertEqual(layout_state(self.snapshot()), layout_state(self.before))
+        self.session.client.send("--世界 Review\r".encode())
+        self.wait_command()
+        self.session.client.wait("$", absent=("Esc Cancel",))
+        after = self.snapshot()
+        created = next(tab for tab in after["tabs"] if tab["tab_id"] not in {tab["tab_id"] for tab in self.before["tabs"]})
+        self.assertEqual(created["label"], "--世界 Review")
+        self.assertEqual(created["workspace_id"], self.origin[0])
+        self.assertEqual(after["focused_tab_id"], created["tab_id"])
+        self.assertEqual(len(after["tabs"]), len(self.before["tabs"]) + 1)
+
+    def test_command_palette_new_workspace_prompts_before_creating_and_focuses_named_workspace(self):
+        self.open_commands("New Workspace")
+        self.session.client.send(b"\r")
+        self.session.client.wait("New Workspace", "Enter Create")
+        self.assertEqual(layout_state(self.snapshot()), layout_state(self.before))
+        self.session.client.send(b"Review\r")
+        self.wait_command()
+        self.session.client.wait("$", absent=("Esc Cancel",))
+        after = self.snapshot()
+        created = next(workspace for workspace in after["workspaces"] if workspace["workspace_id"] not in {workspace["workspace_id"] for workspace in self.before["workspaces"]})
+        self.assertEqual(created["label"], "Review")
+        self.assertEqual(after["focused_workspace_id"], created["workspace_id"])
+        self.assertEqual(len(after["workspaces"]), len(self.before["workspaces"]) + 1)
+
+    def test_command_palette_cancel_new_tab_preserves_focus_and_layout(self):
+        self.open_commands("New Tab")
+        self.session.client.send(b"\r")
+        self.session.client.wait("New Tab", "Enter Create")
+        self.session.client.send(b"Discard\x1b")
+        self.session.client.wait("> New Tab", "Enter Run", absent=("Enter Create",))
+        after = self.finish(b"\x1b", self.origin)
+        self.wait_command()
+        self.assertEqual(focus_state(after), self.origin)
+        self.assertEqual(layout_state(after), layout_state(self.before))
 
     def test_command_palette_hands_off_to_workspace_picker_popup(self):
         self.open_commands("herdrpp.open")

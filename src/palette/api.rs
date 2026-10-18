@@ -1,4 +1,7 @@
-use super::catalog::{Command, Context, Direction, Scope};
+use super::{
+    catalog::{Command, Context, Direction, Scope},
+    naming::Naming,
+};
 use crate::picker::api::{Herdr, decode};
 use anyhow::{Context as _, Result, ensure};
 use serde_json::{Value, json};
@@ -82,18 +85,7 @@ pub fn arguments(command: &Command, context: &Context) -> Result<Option<Vec<Stri
     let args: Vec<String> = match command {
         Command::SearchWorkspaces => return Ok(None),
         Command::Plugin { .. } => return Ok(None),
-        Command::Create(Scope::Workspace) => {
-            vec!["workspace".into(), "create".into(), "--focus".into()]
-        }
-        Command::Create(Scope::Tab) => vec![
-            "tab".into(),
-            "create".into(),
-            "--workspace".into(),
-            required(Scope::Workspace)?.into(),
-            "--focus".into(),
-        ],
-        Command::Create(Scope::Pane) => anyhow::bail!("pane creation requires a split direction"),
-        Command::Rename(_) => return Ok(None),
+        Command::Create(_) | Command::Rename(_) => return Ok(None),
         Command::Close(scope) => vec![scope.cli().into(), "close".into(), required(*scope)?.into()],
         Command::Split(direction @ (Direction::Right | Direction::Down)) => vec![
             "pane".into(),
@@ -141,11 +133,39 @@ pub fn rename_request(
     Ok((format!("{}.rename", scope.cli()), Value::Object(params)))
 }
 
+pub fn create_request(
+    scope: Scope,
+    context: &Context,
+    naming: &Naming,
+    input: Option<&str>,
+) -> Result<(String, Value)> {
+    let input = input.context("creation requires a name prompt")?;
+    ensure!(
+        !input.chars().any(char::is_control),
+        "name must not contain control characters"
+    );
+    let trimmed = input.trim();
+    let label = (!trimmed.is_empty() && trimmed != naming.suggestion(scope)).then_some(trimmed);
+    let workspace_id = context
+        .workspace_id
+        .as_deref()
+        .context("command target is unavailable")?;
+    let params = match scope {
+        Scope::Workspace => {
+            json!({"source_workspace_id":workspace_id,"cwd":naming.workspace_cwd,"focus":true,"label":label})
+        }
+        Scope::Tab => json!({"workspace_id":workspace_id,"focus":true,"label":label}),
+        Scope::Pane => anyhow::bail!("pane creation requires a split direction"),
+    };
+    Ok((format!("{}.create", scope.cli()), params))
+}
+
 pub fn execute(
     api: &Herdr,
     socket: &Path,
     command: &Command,
     context: &Context,
+    naming: &Naming,
     input: Option<&str>,
 ) -> Result<()> {
     let snapshot = decode(&api.call(&["api", "snapshot"])?)?;
@@ -155,7 +175,18 @@ pub fn execute(
     )?;
     match command {
         Command::SearchWorkspaces => api.open(),
+        Command::Create(scope) => {
+            let (method, params) = create_request(*scope, context, naming, input)?;
+            request(socket, &method, params)?;
+            Ok(())
+        }
         Command::Rename(scope) => {
+            if *scope == Scope::Tab
+                && naming.tab_auto_named
+                && input == Some(naming.tab_name.as_str())
+            {
+                return Ok(());
+            }
             let (method, params) = rename_request(*scope, context, input)?;
             request(socket, &method, params)?;
             Ok(())
