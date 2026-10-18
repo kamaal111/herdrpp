@@ -30,7 +30,8 @@ OUTPUT = Path("/output")
 BASELINES = Path("/baselines")
 FONTS = ROOT / "tests/snapshots/fonts"
 CASES = (
-    "showcase-dracula", "hierarchical-unfiltered", "flat-search", "no-matches",
+    "showcase-dracula", "showcase-commands", "showcase-tasks",
+    "hierarchical-unfiltered", "flat-search", "no-matches",
     "narrow-search", "scrolled-selection", "light-search",
     "empty-snapshot", "loading", "tiny-terminal", "tab-cycling",
     "tasks-search", "tasks-diagnostics",
@@ -277,6 +278,8 @@ enabled = false
             self.seed_showcase()
         else:
             self.seed()
+        if self.case == "showcase-tasks":
+            self.seed_showcase_tasks()
         width, height = {
             "narrow-search": (32, 20),
             "scrolled-selection": (160, 12),
@@ -406,6 +409,30 @@ else:
         assert sum(bool(w.get("worktree", {}).get("is_linked_worktree"))
                    for w in snapshot["workspaces"]) == 10, snapshot
 
+    def seed_showcase_tasks(self):
+        root = self.directory / "herdrpp"
+        (root / ".herdr").mkdir()
+        tasks = [
+            {"label": "build", "command": "printf 'Build complete\\n'"},
+            {"label": "dev-server", "command": "./dev-server"},
+            {"label": "format-check", "command": "printf 'Formatting passed\\n'", "new_tab": False},
+            {"label": "lint", "command": "printf 'Lint passed\\n'"},
+            {"label": "test", "command": "printf 'All tests passed\\n'"},
+            {"label": "test:watch", "command": "printf 'Watching tests\\n'"},
+        ]
+        (root / ".herdr/tasks.json").write_text(json.dumps(tasks))
+        (root / ".herdr/dev-starts").write_text("")
+        script = root / "dev-server"
+        script.write_text("#!/bin/sh\ntrap 'exit 0' INT TERM\n"
+                          "printf 'started\\n' >> .herdr/dev-starts\n"
+                          "printf '\\033[2J\\033[3J\\033[H'\n"
+                          "printf '\\n%.0s' $(seq 1 32)\n"
+                          "printf 'Development server ready (run %d)\\n' \"$(wc -l < .herdr/dev-starts)\"\n"
+                          "printf 'Workspace: herdrpp | Task: dev-server\\n'\n"
+                          "printf 'Watching source files for changes\\n'\n"
+                          "while :; do sleep 1; done\n")
+        script.chmod(0o755)
+
     def seed_projects(self, projects, remote=None):
         original = self.api("api", "snapshot")["snapshot"]["workspaces"]
         focus = None
@@ -436,16 +463,24 @@ else:
         return self.client.wait("results", "Esc Cancel")
 
     def capture(self):
-        if self.case == "palette-popup":
+        if self.case in ("palette-popup", "showcase-commands"):
             before = self.api("api", "snapshot")["snapshot"]
             self.api("plugin", "action", "invoke", "herdrpp.commands")
             self.client.wait("Search commands", "Command Palette")
-            self.client.send(b"spl rgt")
-            grid = self.client.wait("> spl rgt", "Split Pane Right", "1 results", "$")
+            if self.case == "showcase-commands":
+                self.client.send(b"\x0e" * 21 + b"\x10" * 7)
+                grid = self.client.wait(
+                    "› Run workspace tasks", "herdrpp.tasks", "New Tab", "Rename Tab",
+                    "Search Workspaces", "Split Pane Right", "Enter Run")
+            else:
+                self.client.send(b"spl rgt")
+                grid = self.client.wait("> spl rgt", "Split Pane Right", "1 results", "$")
             after = self.api("api", "snapshot")["snapshot"]
             assert focus_state(after) == focus_state(before)
             assert layout_state(after) == layout_state(before)
             return grid
+        if self.case == "showcase-tasks":
+            return self.capture_showcase_tasks()
         self.open_picker()
         if self.case == "showcase-dracula":
             grid = self.client.wait("12 results", "no-pr", *(case[1] for case in SHOWCASE_PRS))
@@ -476,6 +511,44 @@ else:
         elif self.case != "narrow-search":
             needles += ["feature/search", "fix/pricing", "dotfiles"]
         return self.client.wait(*needles)
+
+    def run_showcase_task(self, label, output):
+        self.api("plugin", "action", "invoke", "herdrpp.tasks")
+        self.client.wait("Search tasks", "6 results")
+        self.client.send(label.encode())
+        self.client.wait(f"> {label}", "1 results")
+        self.client.send(b"\r")
+        self.client.wait(output, absent=("Task Palette",))
+
+    def capture_showcase_tasks(self):
+        before = self.api("api", "snapshot")["snapshot"]
+        self.run_showcase_task("format-check", "Formatting passed")
+        same_tab = self.api("api", "snapshot")["snapshot"]
+        assert focus_state(same_tab) == focus_state(before)
+        assert layout_state(same_tab) == layout_state(before)
+        self.run_showcase_task("dev-server", "Development server ready (run 1)")
+        started = self.api("api", "snapshot")["snapshot"]
+        assert len(started["tabs"]) == len(before["tabs"]) + 1
+        task_tab = next(tab for tab in started["tabs"] if tab["tab_id"] == started["focused_tab_id"])
+        assert task_tab["label"] == "dev-server", task_tab
+        assert started["focused_tab_id"] != before["focused_tab_id"]
+        self.run_showcase_task("dev-server", "Development server ready (run 2)")
+        restarted = self.api("api", "snapshot")["snapshot"]
+        assert focus_state(restarted) == focus_state(started)
+        assert layout_state(restarted) == layout_state(started)
+        self.api("plugin", "action", "invoke", "herdrpp.tasks")
+        self.client.wait("Search tasks", "6 results")
+        self.client.send(b"\x0e")
+        grid = self.client.wait(
+            "› dev-server", "format-check", "lint", "test:watch", "build",
+            "Task Palette · Task ./dev-server", "Enter Run",
+            "Development server ready (run 2)", "Watching source files for changes")
+        text = "\n".join(self.client.screen.display)
+        labels = ("build", "› dev-server", "format-check", "lint", "test", "test:watch")
+        positions = [text.index(label) for label in labels]
+        assert positions == sorted(positions), text
+        assert str(self.directory) not in text, text
+        return grid
 
     def close(self):
         if self.client:

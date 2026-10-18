@@ -174,6 +174,12 @@ is no MRU history or branch-label search. Reopen to discover changed destination
 
 ## Command palette
 
+![Command palette showing workspace and pane commands alongside herdr++ plugin actions, with Run workspace tasks selected](tests/snapshots/picker/baselines/showcase-commands.png)
+
+Browse built-in commands and plugin actions together, or narrow them with fuzzy
+search. Create and rename commands open name prompts; close commands ask for
+confirmation before acting on the workspace, tab, or pane that opened the palette.
+
 Press **Cmd+Shift+K** to search commands, or invoke
 `herdr plugin action invoke herdrpp.commands`. Ghostty's Cmd+Shift+P remains
 available for its own palette. After installation, select **Reload config**
@@ -214,6 +220,13 @@ Subsequent installs do not restore a deliberately removed palette shortcut.
 Existing conflicting shortcuts are preserved and reported for manual setup.
 
 ## Workspace tasks
+
+![Task palette listing build, development, formatting, lint, and test tasks over a running dev-server tab](tests/snapshots/picker/baselines/showcase-tasks.png)
+
+Search workspace task labels and run them in a new tab or the opening tab's idle
+shell. This isolated example shows a running development task behind its palette.
+Rerunning a task reuses its destination and interrupts a running process before
+restarting; completed tasks keep their output.
 
 Press **Cmd+Shift+R**, or invoke `herdr plugin action invoke herdrpp.tasks`,
 to search task labels using the command palette's keyboard, mouse, and theme
