@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/kamaal111/herdrpp/compare/v0.4.0...v0.5.0) (2026-10-18)
+
+
+### Features
+
+* **tasks:** run workspace tasks from a searchable palette ([b497314](https://github.com/kamaal111/herdrpp/commit/b497314f5d7bc11f8713c2b97188eb513b902e56))
+
 ## [0.4.0](https://github.com/kamaal111/herdrpp/compare/v0.3.1...v0.4.0) (2026-10-18)
 
 
