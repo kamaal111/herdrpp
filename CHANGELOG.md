@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/kamaal111/herdrpp/compare/v0.3.0...v0.3.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **search:** share Cmd+Backspace handling across popups ([6f04f10](https://github.com/kamaal111/herdrpp/commit/6f04f10e24ae61e5920ed7e62cf47759cc4de216))
+
 ## [0.3.0](https://github.com/kamaal111/herdrpp/compare/v0.2.0...v0.3.0) (2026-10-17)
 
 
