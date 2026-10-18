@@ -33,9 +33,10 @@ CASES = (
     "showcase-dracula", "hierarchical-unfiltered", "flat-search", "no-matches",
     "narrow-search", "scrolled-selection", "light-search",
     "empty-snapshot", "loading", "tiny-terminal", "tab-cycling",
+    "tasks-search", "tasks-diagnostics",
     "palette-popup", "palette-search", "palette-empty", "palette-rename", "palette-create", "palette-confirm", "palette-narrow", "palette-loading",
 )
-CONTROLLED = {"empty-snapshot", "loading", "tiny-terminal",
+CONTROLLED = {"tasks-search", "tasks-diagnostics", "empty-snapshot", "loading", "tiny-terminal",
               "palette-search", "palette-empty", "palette-rename", "palette-create", "palette-confirm", "palette-narrow", "palette-loading"}
 SHOWCASE_PRS = (
     (95, "open-passing", "OPEN", False, "SUCCESS", "pr_open", "238636", "✅"),
@@ -802,6 +803,60 @@ class FocusTests(unittest.TestCase):
                 return completed
             time.sleep(0.05)
         self.fail(f"Palette action did not complete: {logs}")
+
+    def write_tasks(self, task):
+        directory = self.session.directory / "herdrpp/.herdr"
+        directory.mkdir(exist_ok=True)
+        (directory / "tasks.json").write_text(json.dumps([task]))
+
+    def open_tasks(self):
+        self.before = self.snapshot()
+        invocation = self.session.api("plugin", "action", "invoke", "herdrpp.tasks")
+        self.command_log = invocation["log"]["log_id"]
+        self.session.client.wait("Search tasks", "Task Palette")
+
+    def test_task_new_tab_reuses_the_same_pane_after_interrupting_a_running_task(self):
+        runs = self.session.directory / "herdrpp/runs"
+        self.write_tasks({"label":"dev-task", "command":"printf 'task-%s-ready\\n' 'run'; printf 'run\\n' >> runs; sleep 30"})
+        self.open_tasks()
+        self.session.client.send(b"\r")
+        self.wait_command()
+        self.session.client.wait("task-run-ready", absent=("Task Palette",))
+        first = self.snapshot()
+        self.assertNotEqual(first["focused_tab_id"], self.origin[1])
+        self.assertEqual(runs.read_text(), "run\n")
+        self.session.api("tab", "focus", self.origin[1])
+        self.open_tasks()
+        self.session.client.send(b"\r")
+        self.wait_command()
+        after = self.snapshot()
+        self.assertEqual(focus_state(after), focus_state(first))
+        self.assertEqual(len(after["tabs"]), len(first["tabs"]))
+        self.assertEqual(runs.read_text(), "run\nrun\n")
+
+    def test_task_same_tab_uses_the_opening_idle_shell(self):
+        self.write_tasks({"label":"test-task", "command":"printf 'task-%s-ready\\n' 'same-pane'", "new_tab":False})
+        self.open_tasks()
+        self.session.client.send(b"\r")
+        self.wait_command()
+        self.session.client.wait("task-same-pane-ready", absent=("Task Palette",))
+        after = self.snapshot()
+        self.assertEqual(focus_state(after), self.origin)
+        self.assertEqual(layout_state(after), layout_state(self.before))
+
+    def test_invalid_task_diagnostics_preserve_focus_and_disable_execution(self):
+        self.write_tasks({"label":"broken-task", "command":"true", "new_tab":"false", "unknown":1})
+        before = self.snapshot()
+        invocation = self.session.api("plugin", "action", "invoke", "herdrpp.tasks")
+        self.command_log = invocation["log"]["log_id"]
+        self.session.client.wait("tasks.json", "Remove the quotes", "unknown field")
+        self.session.client.send(b"\r")
+        self.session.client.wait("Remove the quotes")
+        self.session.client.send(b"\x1b")
+        self.wait_command()
+        after = self.snapshot()
+        self.assertEqual(focus_state(after), self.origin)
+        self.assertEqual(layout_state(after), layout_state(before))
 
     def test_command_palette_reuses_compact_popup_and_keeps_terminal_visible(self):
         self.session.run("herdr", "--session", "snapshot", "pane", "send-text", self.origin[2],

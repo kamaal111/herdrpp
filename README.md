@@ -87,6 +87,12 @@ type = "plugin_action"
 command = "herdrpp.commands"
 description = "Open command palette"
 
+[[keys.command]]
+key = "cmd+shift+r"
+type = "plugin_action"
+command = "herdrpp.tasks"
+description = "Run workspace tasks"
+
 [ui.sidebar.spaces]
 rows = [
   [
@@ -206,6 +212,75 @@ Setup version 2 adds only the Cmd+Shift+K binding to installations that already
 completed version 1. It preserves removed sidebar tokens and Cmd+P bindings.
 Subsequent installs do not restore a deliberately removed palette shortcut.
 Existing conflicting shortcuts are preserved and reported for manual setup.
+
+## Workspace tasks
+
+Press **Cmd+Shift+R**, or invoke `herdr plugin action invoke herdrpp.tasks`,
+to search task labels using the command palette's keyboard, mouse, and theme
+behavior. Escape cancels. Tasks appear in file order until you search.
+
+This repository includes [.herdr/tasks.json](.herdr/tasks.json) with build,
+validation, and test recipes. Select `just: format-check` for a quick run in
+an idle pane of the opening tab, or `just: build` to try a reusable task tab.
+The focus and snapshot tasks require Docker; the test and ready tasks require uv.
+
+Create `.herdr/tasks.json` at the workspace's checkout root:
+
+```json
+[
+  {"label": "dev-server", "command": "just", "args": ["dev-server"]},
+  {"label": "test", "command": "cargo test", "new_tab": false}
+]
+```
+
+Each task accepts exactly these fields:
+
+| Field | Requirement | Default |
+| --- | --- | --- |
+| `label` | Unique, nonblank string without control characters; searchable name | Required |
+| `command` | Nonblank shell command string | Required |
+| `args` | Array of strings, appended as literal arguments | `[]` |
+| `new_tab` | Boolean `true` or `false` | `true` |
+
+Commands run through `/bin/sh` from the checkout root and support shell syntax
+such as pipelines and `&&`. Each argument is shell-quoted independently; empty
+arguments are preserved. NUL characters, duplicate fields, unknown fields,
+explicit `null`, and incorrect types are rejected. The top level must be a JSON
+array; comments and trailing commas are not supported.
+
+Any invalid task disables execution for the entire file. The popup shows the
+absolute file path, task number and label, affected field, and correction for
+each validation error. For example, `Task 2 ("test"), new_tab: expected true or
+false, received string` tells you to remove the quotes from `"false"`. Syntax
+errors include line and column. Use arrow keys, Page Up/Down, Home/End, or the
+mouse wheel to read diagnostics. Save corrections and reopen the palette to
+reload. Missing and empty files show the expected path and an example.
+
+By default, a task opens and focuses a new tab named after its label. With
+`new_tab: false`, it uses the opening tab's idle shell, preferring the opening
+pane, or splits right when no shell is free. Panes reserved for other tasks are
+excluded. An idle shell's pending input is cleared before execution without
+sending Ctrl+C, so a new pane can finish loading its normal startup files.
+Herdr's configured interactive shell and startup mode remain in effect;
+finishing a task returns to that same shell with its settings intact.
+
+Rerunning the same label in the same workspace and checkout focuses its
+remembered pane, even from another tab. A running process receives Ctrl+C; the
+runner waits up to five seconds for the shell. If it remains busy, the runner
+reports an error and starts no replacement. Completed tasks reuse their pane
+and retain output. Closed destinations are allocated again using `new_tab`.
+Editing the command retains its destination; renaming the label creates a new
+identity. Detached background processes are outside restart management.
+
+Checkout discovery prefers workspace worktree metadata, otherwise the Git root
+of the opening pane's foreground or original directory. A resolvable Git
+checkout is required; tasks are not inherited from ancestor configurations.
+
+Setup migration 3 adds the available Cmd+Shift+R binding on the next installer
+run. Existing bindings are preserved; conflicts are reported for manual setup.
+After installation, select **Reload config** in the viewing client. If your
+terminal reserves the chord, use `prefix+shift+r` instead. Later installations
+leave a deliberately removed shortcut untouched.
 
 ## Pull request status
 

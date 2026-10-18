@@ -46,7 +46,7 @@ README example. `pick` and `watch` are internal lifecycle commands.
 
 ## Architecture
 
-One executable dispatches picker, palette, and PR commands. `src/picker` owns search,
+One executable dispatches picker, palette, task, and PR commands. `src/picker` owns search,
 navigation, rendering, and saved-theme support. `src/pr` owns GitHub association,
 metadata reporting, and watcher lifecycle. The shared command runner owns
 bounded subprocess I/O, process-group cleanup, timeout, and cancellation.
@@ -60,6 +60,11 @@ as the picker. It exits after writing a selection to a private temporary mailbox
 the action waits for the popup PTY to be released before dispatching against the
 opening context.
 Plugin actions use the public session socket API to retain that context.
+`src/tasks` owns strict task-file validation, checkout discovery, and remembered
+terminal destinations. Tasks reuse the palette lifecycle with a task catalog
+and scrollable diagnostics. Session-scoped destination records and a launch
+lock prevent overlapping allocations. Process-info probes identify idle shells;
+restarts use Ctrl+C only and fail after five seconds without a replacement.
 
 Plugin settings have feature sections, starting with `[picker]`. Extend this
 schema with explicit settings when adding a feature; unknown settings are errors.
@@ -86,7 +91,8 @@ adds sidebar tokens and an available Cmd+P binding in one atomic change.
 Conflicting shortcuts are preserved and reported for manual resolution.
 Completion, locks, and original backups live under
 `${XDG_STATE_HOME:-$HOME/.local/state}/herdrpp/configs/`, keyed by resolved path.
-Version 2 adds only the available Cmd+Shift+K palette binding. Each completed
+Version 2 adds only the available Cmd+Shift+K palette binding. Version 3 adds
+only the available Cmd+Shift+R workspace task binding. Each completed
 migration stays complete after user edits or deletion; upgrades run only pending
 migrations and keep per-migration backups.
 

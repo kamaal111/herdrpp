@@ -7,6 +7,8 @@ use herdrpp::{
 fn execute(action: &str) -> Result<()> {
     match action {
         "open" | "pick" | "check" => cli::run(&Herdr::default(), action),
+        "tasks" => herdrpp::palette::cli::open_mode(&Herdr::default(), true),
+        "pick-task" => herdrpp::palette::cli::pick_mode(true),
         "commands" => herdrpp::palette::cli::open(&Herdr::default()),
         "pick-command" => herdrpp::palette::cli::pick(),
         "start" => Session::load()?.start(),
@@ -21,7 +23,7 @@ fn execute(action: &str) -> Result<()> {
         }
         "--help" | "-h" => {
             println!(
-                "herdr++ {}\n\ncommands   Open command palette\nopen       Search workspaces, worktrees and tabs\ncheck      Validate workspace discovery without changing focus\nstart      Start one background PR watcher per Herdr session\nrefresh    Refresh workspace PR metadata once\nstop       Request watcher shutdown\ncheck-pr   Read PR associations without reporting metadata\nconfigure  Apply pending viewing config setup once\npick       Internal popup entrypoint\npick-command Internal command palette entrypoint\nwatch      Internal watcher entrypoint\n\nPR commands require git and authenticated gh; picker commands do not.\nconfigure honors HERDR_CONFIG_PATH and records setup outside config.",
+                "herdr++ {}\n\ncommands   Open command palette\ntasks      Run workspace tasks\nopen       Search workspaces, worktrees and tabs\ncheck      Validate workspace discovery without changing focus\nstart      Start one background PR watcher per Herdr session\nrefresh    Refresh workspace PR metadata once\nstop       Request watcher shutdown\ncheck-pr   Read PR associations without reporting metadata\nconfigure  Apply pending viewing config setup once\npick       Internal popup entrypoint\npick-command Internal command palette entrypoint\npick-task  Internal task palette entrypoint\nwatch      Internal watcher entrypoint\n\nPR commands require git and authenticated gh; picker commands do not.\nconfigure honors HERDR_CONFIG_PATH and records setup outside config.",
                 env!("CARGO_PKG_VERSION")
             );
             Ok(())
@@ -45,7 +47,7 @@ fn main() {
         if valid_arguments
             && matches!(
                 action.as_str(),
-                "open" | "pick" | "commands" | "pick-command"
+                "open" | "pick" | "commands" | "pick-command" | "tasks" | "pick-task"
             )
             && let Err(error) = Herdr::default().notify(&message)
         {

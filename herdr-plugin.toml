@@ -51,3 +51,16 @@ placement = "popup"
 width = "80%"
 height = 22
 command = ["./target/release/herdrpp", "pick-command"]
+
+[[actions]]
+id = "tasks"
+title = "Run workspace tasks"
+command = ["./target/release/herdrpp", "tasks"]
+
+[[panes]]
+id = "task-palette"
+title = "Task Palette"
+placement = "popup"
+width = "80%"
+height = 22
+command = ["./target/release/herdrpp", "pick-task"]

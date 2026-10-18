@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value};
 
 // Bump only for a new, targeted config migration, never for a package release.
-const CONFIG_VERSION: u32 = 2;
+const CONFIG_VERSION: u32 = 3;
 const FNV1A_64_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV1A_64_PRIME: u64 = 0x100000001b3;
 const TOKENS: [(&str, &str); 4] = [
@@ -370,6 +370,19 @@ pub fn run() -> Result<()> {
         updated = text;
         if conflict {
             conflicts.push("Cmd+Shift+K is already bound; existing shortcut preserved. Add herdrpp.commands manually using another key, such as prefix+shift+f.");
+        }
+    }
+    if completed < 3 {
+        backups.push((3, updated.clone()));
+        let (text, conflict) = migrate_shortcut(
+            &updated,
+            "cmd+shift+r",
+            "herdrpp.tasks",
+            "Run workspace tasks",
+        )?;
+        updated = text;
+        if conflict {
+            conflicts.push("Cmd+Shift+R is already bound; existing shortcut preserved. Add herdrpp.tasks manually using another key, such as prefix+shift+r.");
         }
     }
     if original.as_deref() != Some(&updated) {

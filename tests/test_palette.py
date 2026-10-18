@@ -54,7 +54,8 @@ def await_file(path):
     return path
 
 
-class TestPaletteOwner:
+class PaletteOwnerHarness:
+    action = "commands"
     @pytest.fixture(autouse=True)
     def setup(self, tmp_path, release_binary):
         self.root = tmp_path
@@ -107,7 +108,7 @@ class TestPaletteOwner:
             self.slave = None
 
     def start(self, discovery=True):
-        self.process = subprocess.Popen([self.binary, "commands"], env=self.env,
+        self.process = subprocess.Popen([self.binary, self.action], env=self.env,
                                         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         path = await_file(self.root / "request")
         directory = Path(path.read_text())
@@ -128,6 +129,8 @@ class TestPaletteOwner:
         assert self.process.returncode == 0, (stdout, stderr)
         return [json.loads(line) for line in (self.root / "calls").read_text().splitlines()]
 
+
+class TestPaletteOwner(PaletteOwnerHarness):
     def test_owner_waits_for_host_popup_teardown_before_exactly_one_original_pane_split(self):
         directory = self.start()
         calls = self.select(directory, {"id":"herdr:split_right", "input":None, "confirmed":False})
