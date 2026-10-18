@@ -53,6 +53,119 @@ fn typing_paste_and_backspace_filter_and_empty_enter_does_nothing() {
 }
 
 #[test]
+fn clear_shortcuts_restore_commands_selection_scroll_and_click_targets() {
+    for (code, modifiers) in [
+        (KeyCode::Backspace, KeyModifiers::SUPER),
+        (KeyCode::Char('u'), KeyModifiers::CONTROL),
+    ] {
+        let mut app = app();
+        app.set_query("Split Pane Right".into());
+        draw(&mut app, 80, 20);
+        assert!(!app.hits.is_empty());
+        app.offset = 3;
+        assert_eq!(
+            app.handle(Event::Key(KeyEvent::new(code, modifiers))),
+            Action::Continue
+        );
+        assert_eq!(app.query, "");
+        assert_eq!(app.results.len(), 16);
+        assert_eq!(app.selected, Some(0));
+        assert_eq!(app.offset, 0);
+        assert!(app.hits.is_empty());
+        assert_eq!(app.mode, Mode::Search);
+        app.set_query("nonexistent".into());
+        assert_eq!(
+            app.handle(Event::Key(KeyEvent::new(code, modifiers))),
+            Action::Continue
+        );
+        assert_eq!(app.results.len(), 16);
+        assert_eq!(app.selected, Some(0));
+    }
+}
+
+#[test]
+fn clear_shortcuts_clear_rename_input_and_validation_error_without_leaving_prompt() {
+    for (code, modifiers) in [
+        (KeyCode::Backspace, KeyModifiers::SUPER),
+        (KeyCode::Char('u'), KeyModifiers::CONTROL),
+    ] {
+        let mut app = app();
+        app.set_query("Rename Tab".into());
+        let item = app.results[0].item;
+        app.handle(key(KeyCode::Enter));
+        app.handle(Event::Paste("--世界 Review".into()));
+        assert_eq!(
+            app.handle(Event::Key(KeyEvent::new(code, modifiers))),
+            Action::Continue
+        );
+        assert_eq!(
+            app.mode,
+            Mode::Rename {
+                item,
+                input: String::new(),
+                error: false
+            }
+        );
+        assert_eq!(app.query, "Rename Tab");
+        assert_eq!(app.handle(key(KeyCode::Enter)), Action::Continue);
+        assert!(draw(&mut app, 80, 20).contains("Enter a nonblank name"));
+        app.handle(Event::Key(KeyEvent::new(code, modifiers)));
+        assert_eq!(
+            app.mode,
+            Mode::Rename {
+                item,
+                input: String::new(),
+                error: false
+            }
+        );
+        app.handle(Event::Paste("New name".into()));
+        assert_eq!(
+            app.handle(key(KeyCode::Enter)),
+            Action::Execute(herdrpp::palette::app::Selection {
+                id: "herdr:tab_rename".into(),
+                input: Some("New name".into()),
+                confirmed: false,
+            })
+        );
+    }
+}
+
+#[test]
+fn clear_shortcuts_leave_close_confirmation_unchanged() {
+    let mut app = app();
+    app.set_query("Close Tab".into());
+    let item = app.results[0].item;
+    app.handle(key(KeyCode::Enter));
+    app.handle(Event::Key(KeyEvent::new(
+        KeyCode::Backspace,
+        KeyModifiers::SUPER,
+    )));
+    app.handle(Event::Key(KeyEvent::new(
+        KeyCode::Char('u'),
+        KeyModifiers::CONTROL,
+    )));
+    assert_eq!(app.mode, Mode::Confirm { item });
+    assert_eq!(app.query, "Close Tab");
+}
+
+#[test]
+fn clear_key_releases_do_not_edit_and_plain_u_still_types() {
+    let mut app = app();
+    app.set_query("split".into());
+    for (code, modifiers) in [
+        (KeyCode::Backspace, KeyModifiers::SUPER),
+        (KeyCode::Char('u'), KeyModifiers::CONTROL),
+    ] {
+        let mut release = KeyEvent::new(code, modifiers);
+        release.kind = terminal_input::event::KeyEventKind::Release;
+        assert_eq!(app.handle(Event::Key(release)), Action::Continue);
+        assert_eq!(app.query, "split");
+    }
+    app.handle(key(KeyCode::Char('u')));
+    assert_eq!(app.query, "splitu");
+}
+
+#[test]
 fn rename_rejects_blank_input_preserves_literal_unicode_and_escape_returns_to_results() {
     let mut app = app();
     app.set_query("Rename Tab".into());

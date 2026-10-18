@@ -116,6 +116,122 @@ fn backspace_updates_query_and_selection() {
     assert_eq!(app.query, "colo");
     assert_eq!(app.selected, Some(0));
 }
+
+#[test]
+fn command_backspace_clears_query_and_restores_unfiltered_selection() {
+    for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
+        let mut app = App::new(
+            parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap(),
+            mode,
+        );
+        app.set_query("colorpicker".into());
+        app.handle(key(KeyCode::Right));
+        assert!(app.selected_tab.is_some());
+        app.offset = 1;
+        app.result_hits.push(herdrpp::picker::app::ResultHit {
+            area: Rect::new(0, 0, 10, 1),
+            workspace: 0,
+            tab: Some(0),
+        });
+
+        assert_eq!(
+            app.handle(Event::Key(KeyEvent::new(
+                KeyCode::Backspace,
+                KeyModifiers::SUPER,
+            ))),
+            Action::Continue
+        );
+        assert_eq!(app.query, "");
+        assert_eq!(
+            app.results
+                .iter()
+                .map(|result| result.workspace.target.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                Target::Workspace("w2".into()),
+                Target::Workspace("w1".into()),
+                Target::Workspace("w3".into()),
+            ]
+        );
+        assert_eq!(app.selected, Some(0));
+        assert_eq!(app.selected_tab, None);
+        assert_eq!(app.offset, 0);
+        assert!(app.result_hits.is_empty());
+        assert_eq!(
+            app.handle(key(KeyCode::Enter)),
+            Action::Switch(Target::Workspace("w2".into()))
+        );
+    }
+}
+
+#[test]
+fn command_backspace_restores_results_from_no_matches_and_handles_empty_query() {
+    let mut app = app();
+    app.set_query("nonexistenttttt".into());
+    assert!(app.results.is_empty());
+    let clear = Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::SUPER));
+    assert_eq!(app.handle(clear.clone()), Action::Continue);
+    assert_eq!(app.query, "");
+    assert_eq!(app.results.len(), 3);
+    assert_eq!(app.selected, Some(0));
+    assert_eq!(app.handle(clear), Action::Continue);
+    assert_eq!(app.query, "");
+    assert_eq!(app.results.len(), 3);
+    assert_eq!(app.selected, Some(0));
+}
+
+#[test]
+fn command_backspace_release_does_not_edit_query() {
+    let mut app = app();
+    app.set_query("colorpicker".into());
+    let mut event = KeyEvent::new(KeyCode::Backspace, KeyModifiers::SUPER);
+    event.kind = terminal_input::event::KeyEventKind::Release;
+    assert_eq!(app.handle(Event::Key(event)), Action::Continue);
+    assert_eq!(app.query, "colorpicker");
+}
+
+#[test]
+fn ghostty_command_backspace_control_u_clears_query_and_restores_selection() {
+    let mut app = app();
+    app.set_query("colorpicker".into());
+    app.handle(key(KeyCode::Right));
+    assert_eq!(
+        app.handle(Event::Key(KeyEvent::new(
+            KeyCode::Char('u'),
+            KeyModifiers::CONTROL,
+        ))),
+        Action::Continue
+    );
+    assert_eq!(app.query, "");
+    assert_eq!(app.results.len(), 3);
+    assert_eq!(app.selected, Some(0));
+    assert_eq!(app.selected_tab, None);
+    assert_eq!(
+        app.handle(key(KeyCode::Enter)),
+        Action::Switch(Target::Workspace("w2".into()))
+    );
+}
+
+#[test]
+fn plain_u_types_and_control_u_release_does_not_clear() {
+    let mut app = app();
+    app.set_query("color".into());
+    assert_eq!(app.handle(key(KeyCode::Char('u'))), Action::Continue);
+    assert_eq!(app.query, "coloru");
+    let mut release = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
+    release.kind = terminal_input::event::KeyEventKind::Release;
+    assert_eq!(app.handle(Event::Key(release)), Action::Continue);
+    assert_eq!(app.query, "coloru");
+}
+
+#[test]
+fn backspace_removes_one_unicode_character() {
+    let mut app = app();
+    app.set_query("color日本".into());
+    assert_eq!(app.handle(key(KeyCode::Backspace)), Action::Continue);
+    assert_eq!(app.query, "color日");
+}
+
 #[test]
 fn search_reset_and_resize_keep_selection_visible() {
     let mut app = app();

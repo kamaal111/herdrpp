@@ -716,6 +716,21 @@ class FocusTests(unittest.TestCase):
         after = self.finish(b"\r", target)
         self.assertEqual(focus_state(after), target)
 
+    def assert_picker_clear_preserves_focus(self, keys):
+        self.open_picker("feature/search tests")
+        self.session.client.send(keys)
+        self.session.client.wait("Search workspaces, worktrees and tabs",
+                                 absent=("> feature/search tests",))
+        self.assertEqual(focus_state(self.snapshot()), self.origin)
+        after = self.finish(b"\x1b", self.origin)
+        self.assertEqual(focus_state(after), self.origin)
+
+    def test_command_backspace_through_herdr_clears_picker_without_changing_focus(self):
+        self.assert_picker_clear_preserves_focus(b"\x1b[127;9u")
+
+    def test_ghostty_command_backspace_ctrl_u_through_herdr_clears_picker(self):
+        self.assert_picker_clear_preserves_focus(b"\x15")
+
     def test_ok_click_restores_workspace_tab_and_non_root_pane(self):
         target = self.prepare_target("TCG", "Terminal")
         self.open_picker("TCG")
@@ -807,10 +822,29 @@ class FocusTests(unittest.TestCase):
         self.wait_command()
         self.assertEqual(focus_state(after), self.origin)
 
+    def assert_commands_clear_preserves_focus(self, keys):
+        self.open_commands("Split Pane Right")
+        self.session.client.send(keys)
+        self.session.client.wait("Search commands", absent=("> Split Pane Right",))
+        self.assertEqual(focus_state(self.snapshot()), self.origin)
+        after = self.finish(b"\x1b", self.origin)
+        self.wait_command()
+        self.assertEqual(focus_state(after), self.origin)
+
+    def test_ghostty_command_backspace_clears_command_palette(self):
+        self.assert_commands_clear_preserves_focus(b"\x15")
+
+    def test_command_backspace_clears_command_palette(self):
+        self.assert_commands_clear_preserves_focus(b"\x1b[127;9u")
+
     def test_command_palette_renames_original_tab(self):
         self.open_commands("Rename Tab")
         self.session.client.send(b"\r")
         self.session.client.wait("Enter a name", "Rename Tab")
+        self.session.client.send(b"discard this name")
+        self.session.client.wait("> discard this name")
+        self.session.client.send(b"\x15")
+        self.session.client.wait("Enter a name", absent=("> discard this name",))
         self.session.client.send("--世界 Review\r".encode())
         self.wait_command()
         after = self.finish(b"", self.origin)

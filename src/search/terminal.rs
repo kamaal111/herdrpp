@@ -1,6 +1,9 @@
 use anyhow::Result;
 use crossterm::{
-    event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -23,6 +26,7 @@ impl Screen {
         execute!(
             io::stdout(),
             EnterAlternateScreen,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES),
             EnableMouseCapture,
             EnableBracketedPaste
         )?;
@@ -45,6 +49,7 @@ impl Drop for Screen {
             io::stdout(),
             DisableBracketedPaste,
             DisableMouseCapture,
+            PopKeyboardEnhancementFlags,
             LeaveAlternateScreen,
             crossterm::cursor::Show
         );

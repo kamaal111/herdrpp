@@ -204,6 +204,9 @@ impl App {
                     KeyCode::Left => self.navigate_tab(-1),
                     KeyCode::Right => self.navigate_tab(1),
                     KeyCode::Enter => return self.activate(),
+                    _ if crate::search::input::is_clear_shortcut(&key) => {
+                        self.set_query(String::new());
+                    }
                     KeyCode::Backspace => {
                         let mut query = self.query.clone();
                         query.pop();
