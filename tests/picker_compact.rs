@@ -46,6 +46,7 @@ fn command_palette_uses_the_same_search_surface_without_an_inner_panel() {
     let mut app = herdrpp::palette::app::App::new(
         context.clone(),
         herdrpp::palette::catalog::builtins(&context),
+        herdrpp::palette::naming::Naming::default(),
         herdrpp::picker::theme::Theme::default(),
         None,
     );

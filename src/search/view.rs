@@ -29,6 +29,45 @@ pub fn render_input(
     placeholder: &str,
     count: usize,
 ) {
+    render_input_state(
+        frame,
+        input_area,
+        separator_area,
+        palette,
+        (query, false),
+        placeholder,
+        count,
+    );
+}
+
+pub fn render_name_input(
+    frame: &mut Frame<'_>,
+    input_area: Rect,
+    separator_area: Rect,
+    palette: Palette,
+    input: &str,
+    selected: bool,
+) {
+    render_input_state(
+        frame,
+        input_area,
+        separator_area,
+        palette,
+        (input, selected),
+        "Enter a name",
+        1,
+    );
+}
+
+fn render_input_state(
+    frame: &mut Frame<'_>,
+    input_area: Rect,
+    separator_area: Rect,
+    palette: Palette,
+    (query, selected): (&str, bool),
+    placeholder: &str,
+    count: usize,
+) {
     let count = format!(" {} results ", count);
     let input_width = usize::from(input_area.width).saturating_sub(count.len());
     let prompt = if query.is_empty() { placeholder } else { query };
@@ -36,7 +75,20 @@ pub fn render_input(
     while tail.width() > input_width.saturating_sub(2) && !tail.is_empty() {
         tail.remove(0);
     }
-    let mut header = vec![Span::raw("> "), Span::raw(tail.clone())];
+    let mut header = vec![
+        Span::raw("> "),
+        Span::styled(
+            tail.clone(),
+            if selected && !query.is_empty() {
+                palette
+                    .base_style()
+                    .bg(palette.selection_bg)
+                    .add_modifier(Modifier::REVERSED)
+            } else {
+                palette.base_style()
+            },
+        ),
+    ];
     header.push(Span::raw(
         " ".repeat(input_width.saturating_sub(2 + tail.width())),
     ));

@@ -137,10 +137,16 @@ def case(
 def palette_case(keys, expected, loading=False):
     with tempfile.TemporaryDirectory(prefix="herdrpp-palette-pty-") as directory:
         directory = Path(directory)
-        catalog = dict(context={}, warning=None, items=[dict(
-            id="herdr:split_right", title="Split Pane Right", source="Herdr",
-            description="", command={"Split":"Right"},
-        )])
+        catalog = dict(context={}, warning=None,
+                       naming=dict(workspace_name="Project", tab_name="Codex", pane_name="",
+                                   tab_auto_named=True, workspace_cwd=None,
+                                   workspace_suggestion="workspace", tab_suggestion="3"),
+                       items=[dict(id="herdr:split_right", title="Split Pane Right", source="Herdr",
+                                   description="", command={"Split":"Right"}),
+                              dict(id="herdr:tab_rename", title="Rename Tab", source="Herdr",
+                                   description="", command={"Rename":"Tab"}),
+                              dict(id="herdr:tab_create", title="New Tab", source="Herdr",
+                                   description="", command={"Create":"Tab"})])
         if not loading:
             (directory / "catalog.json").write_text(json.dumps(catalog))
         config = directory / "herdr.toml"
@@ -183,6 +189,10 @@ def main():
     palette_case(b"unmatched\x1b[127;9uspl rgt\r", dict(id="herdr:split_right", input=None, confirmed=False))
     palette_case(b"\x1b", None)
     palette_case(b"\x1b", None, loading=True)
+    palette_case(b"Rename Tab\r Review\r", dict(id="herdr:tab_rename", input="Codex Review", confirmed=False))
+    palette_case(b"New Tab\rReview\r", dict(id="herdr:tab_create", input="Review", confirmed=False))
+    palette_case(b"New Tab\r\r", dict(id="herdr:tab_create", input="3", confirmed=False))
+    palette_case(b"New Tab\r\x15\r", dict(id="herdr:tab_create", input="", confirmed=False))
     case(b"\x1b")
     case(b"\x1b", loading=True)
     case(b"col\x1b")

@@ -3,6 +3,9 @@
 import json
 import os
 import pty
+import socket
+import threading
+import tempfile
 from pathlib import Path
 import subprocess
 import time
@@ -20,10 +23,12 @@ with (root / "calls").open("a") as log:
 result = {"type":"ok"}
 if args == ["api", "snapshot"]:
     result = {"snapshot": {
-        "workspaces":[{"workspace_id":"w2"}],
-        "tabs":[{"tab_id":"w2:t7","workspace_id":"w2"}],
-        "panes":[{"pane_id":"w2:p8","workspace_id":"w2","tab_id":"w2:t7"}]
+        "workspaces":[{"workspace_id":"w2","label":"Project","new_workspace_cwd":str(root / "project")}],
+        "tabs":[{"tab_id":"w2:t7","workspace_id":"w2","label":"Codex","custom_label":False}],
+        "panes":[{"pane_id":"w2:p8","workspace_id":"w2","tab_id":"w2:t7","label":"Terminal"}]
     }}
+    if os.environ.get("PALETTE_TEST_TARGET_GONE") and (root / "request").exists():
+        result["snapshot"]["tabs"] = []
 elif args[:3] == ["plugin", "pane", "open"] and "--env" in args:
     request = args[args.index("--env") + 1].split("=", 1)[1]
     (root / "request").write_text(request)
@@ -68,6 +73,30 @@ class TestPaletteOwner:
             self.process.kill()
             self.process.wait(timeout=5)
         self.close_popup()
+
+    @pytest.fixture
+    def socket_requests(self):
+        requests = []
+        socket_directory = tempfile.TemporaryDirectory(prefix="hpp-", dir="/tmp")
+        self.env["HERDR_SOCKET_PATH"] = str(Path(socket_directory.name) / "api.sock")
+        listener = socket.socket(socket.AF_UNIX)
+        listener.bind(self.env["HERDR_SOCKET_PATH"])
+        listener.listen(1)
+        listener.settimeout(8)
+
+        def serve():
+            with listener.accept()[0] as connection:
+                with connection.makefile("rb") as stream:
+                    request = json.loads(stream.readline())
+                requests.append(request)
+                connection.sendall((json.dumps({"id": request["id"], "result": {"type": "ok"}}) + "\n").encode())
+
+        worker = threading.Thread(target=serve, daemon=True)
+        worker.start()
+        yield requests
+        worker.join(timeout=8)
+        listener.close()
+        socket_directory.cleanup()
 
     def close_popup(self):
         if self.master is not None:
@@ -128,3 +157,57 @@ class TestPaletteOwner:
         assert "Plugin commands unavailable" in catalog["warning"]
         calls = self.select(directory, None)
         assert [call for call in calls if call[:3] == ["plugin", "pane", "close"]] == []
+
+    @pytest.mark.parametrize(("command", "method", "params"), [
+        ("herdr:tab_create", "tab.create", {"workspace_id":"w2", "focus":True, "label":"--世界 Review"}),
+        ("herdr:workspace_create", "workspace.create", {"source_workspace_id":"w2", "focus":True, "label":"--世界 Review"}),
+    ])
+    def test_named_creation_waits_for_popup_teardown_and_targets_original_workspace(self, socket_requests, command, method, params):
+        directory = self.start()
+        calls = self.select(directory, {"id":command, "input":"--世界 Review", "confirmed":False})
+        assert len(socket_requests) == 1
+        assert socket_requests[0]["method"] == method
+        assert {key: socket_requests[0]["params"][key] for key in params} == params
+        assert calls.count(["api", "snapshot"]) == 2
+        assert not directory.exists()
+
+    def test_workspace_creation_uses_the_directory_captured_before_popup(self, socket_requests):
+        directory = self.start()
+        self.select(directory, {"id":"herdr:workspace_create", "input":"Review", "confirmed":False})
+        assert socket_requests[0]["params"]["cwd"] == str(self.root / "project")
+
+    @pytest.mark.parametrize("text", ["", "2"])
+    def test_creation_with_blank_or_suggested_name_uses_automatic_naming(self, socket_requests, text):
+        directory = self.start()
+        self.select(directory, {"id":"herdr:tab_create", "input":text, "confirmed":False})
+        assert len(socket_requests) == 1
+        assert socket_requests[0]["params"]["label"] is None
+
+    def test_catalog_transfers_snapshot_names_without_replacing_plugin_context(self):
+        directory = self.start()
+        catalog = json.loads((directory / "catalog.json").read_text())
+        assert catalog["naming"]["workspace_name"] == "Project"
+        assert catalog["naming"]["tab_name"] == "Codex"
+        assert catalog["naming"]["pane_name"] == "Terminal"
+        assert catalog["naming"]["tab_auto_named"] is True
+        assert catalog["naming"]["tab_suggestion"] == "2"
+        assert catalog["naming"]["workspace_suggestion"] == "project"
+        assert "naming" not in catalog["context"]
+        self.select(directory, None)
+
+    def test_accepting_unchanged_automatic_tab_name_performs_no_rename(self):
+        directory = self.start()
+        calls = self.select(directory, {"id":"herdr:tab_rename", "input":"Codex", "confirmed":False})
+        assert calls.count(["api", "snapshot"]) == 2
+        assert self.process.returncode == 0
+
+    def test_creation_rejects_a_closed_original_target_without_socket_execution(self):
+        self.env["PALETTE_TEST_TARGET_GONE"] = "1"
+        directory = self.start()
+        (directory / "selection.json").write_text(json.dumps({"id":"herdr:tab_create", "input":"Review", "confirmed":False}))
+        with pytest.raises(subprocess.TimeoutExpired):
+            self.process.communicate(timeout=0.15)
+        self.close_popup()
+        stdout, stderr = self.process.communicate(timeout=8)
+        assert self.process.returncode == 1, (stdout, stderr)
+        assert "original tab is no longer available" in stderr

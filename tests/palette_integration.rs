@@ -147,3 +147,98 @@ fn socket_transport_rejects_uncorrelated_response_without_retry() {
     );
     server.join().unwrap();
 }
+
+#[test]
+fn creation_requests_use_original_workspace_and_preserve_literal_custom_names() {
+    let naming = herdrpp::palette::naming::Naming {
+        workspace_cwd: Some("/projects/herdrpp".into()),
+        workspace_suggestion: "herdrpp".into(),
+        tab_suggestion: "3".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        api::create_request(Scope::Tab, &context(), &naming, Some("--世界 Review")).unwrap(),
+        (
+            "tab.create".into(),
+            json!({"workspace_id":"w2","focus":true,"label":"--世界 Review"})
+        )
+    );
+    assert_eq!(
+        api::create_request(Scope::Workspace, &context(), &naming, Some("Review")).unwrap(),
+        (
+            "workspace.create".into(),
+            json!({"source_workspace_id":"w2","cwd":"/projects/herdrpp","focus":true,"label":"Review"})
+        )
+    );
+    assert_eq!(
+        api::create_request(Scope::Tab, &context(), &naming, Some("3"))
+            .unwrap()
+            .1["label"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        api::create_request(Scope::Workspace, &context(), &naming, Some("herdrpp"))
+            .unwrap()
+            .1["label"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        api::create_request(Scope::Tab, &context(), &naming, Some("  "))
+            .unwrap()
+            .1["label"],
+        serde_json::Value::Null
+    );
+    assert!(api::create_request(Scope::Tab, &context(), &naming, Some("bad\nname")).is_err());
+    assert!(api::create_request(Scope::Tab, &context(), &naming, None).is_err());
+    assert!(api::create_request(Scope::Tab, &Context::default(), &naming, Some("Review")).is_err());
+}
+
+#[test]
+fn creation_selection_requires_prompt_input_and_rejects_control_characters() {
+    let items = catalog::builtins(&context());
+    assert_eq!(
+        cli::validate_selection(
+            &items,
+            &Selection {
+                id: "herdr:tab_create".into(),
+                input: Some(String::new()),
+                confirmed: false
+            }
+        )
+        .unwrap(),
+        &Command::Create(Scope::Tab)
+    );
+    assert!(
+        cli::validate_selection(
+            &items,
+            &Selection {
+                id: "herdr:tab_create".into(),
+                input: None,
+                confirmed: false
+            }
+        )
+        .is_err()
+    );
+    assert!(
+        cli::validate_selection(
+            &items,
+            &Selection {
+                id: "herdr:tab_create".into(),
+                input: Some("name".into()),
+                confirmed: true
+            }
+        )
+        .is_err()
+    );
+    assert!(
+        cli::validate_selection(
+            &items,
+            &Selection {
+                id: "herdr:tab_create".into(),
+                input: Some("bad\nname".into()),
+                confirmed: false
+            }
+        )
+        .is_err()
+    );
+}

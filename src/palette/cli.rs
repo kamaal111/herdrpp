@@ -2,6 +2,7 @@ use super::{
     api,
     app::Selection,
     catalog::{self, Command, Context, Item},
+    naming::Naming,
     ui,
 };
 use crate::picker::{
@@ -28,6 +29,7 @@ const LIMIT: u64 = 4 * 1024 * 1024;
 #[derive(Serialize, Deserialize)]
 pub struct Catalog {
     pub context: Context,
+    pub naming: Naming,
     pub items: Vec<Item>,
     pub warning: Option<String>,
 }
@@ -68,13 +70,22 @@ pub fn validate_selection<'a>(items: &'a [Item], selection: &Selection) -> Resul
             selection.confirmed && selection.input.is_none(),
             "closing requires confirmation"
         ),
-        Command::Rename(_) => ensure!(
+        Command::Create(_) => ensure!(
             selection
                 .input
                 .as_ref()
-                .is_some_and(|text| !text.trim().is_empty()),
-            "rename requires a name"
+                .is_some_and(|text| !text.chars().any(char::is_control))
+                && !selection.confirmed,
+            "creation requires a name prompt"
         ),
+        Command::Rename(_) => {
+            ensure!(
+                selection.input.as_ref().is_some_and(
+                    |text| !text.trim().is_empty() && !text.chars().any(char::is_control)
+                ) && !selection.confirmed,
+                "rename requires a name"
+            )
+        }
         _ => ensure!(
             selection.input.is_none() && !selection.confirmed,
             "unexpected palette command input"
@@ -83,7 +94,8 @@ pub fn validate_selection<'a>(items: &'a [Item], selection: &Selection) -> Resul
     Ok(command)
 }
 
-fn load(api: &Herdr, context: &Context, cancelled: &AtomicBool) -> Catalog {
+fn load(api: &Herdr, context: &Context, mut naming: Naming, cancelled: &AtomicBool) -> Catalog {
+    naming.resolve_workspace_suggestion(cancelled);
     let mut items = catalog::builtins(context);
     let plugins = (|| {
         let plugins = decode(&api.call_cancellable(&["plugin", "list", "--json"], cancelled)?)?;
@@ -100,6 +112,7 @@ fn load(api: &Herdr, context: &Context, cancelled: &AtomicBool) -> Catalog {
     };
     Catalog {
         context: context.clone(),
+        naming,
         items,
         warning,
     }
@@ -109,12 +122,13 @@ fn owner(
     api: &Herdr,
     directory: &Path,
     context: &Context,
+    naming: Naming,
     cancelled: &AtomicBool,
 ) -> Result<Option<(Catalog, Selection)>> {
     thread::scope(|scope| {
         let (sender, receiver) = mpsc::channel();
         scope.spawn(move || {
-            let _ = sender.send(load(api, context, cancelled));
+            let _ = sender.send(load(api, context, naming, cancelled));
         });
         let result = (|| {
             let mut catalog = None;
@@ -208,14 +222,25 @@ pub fn open(api: &Herdr) -> Result<()> {
         snapshot.get("snapshot").context("missing snapshot")?,
         &context,
     )?;
+    let naming = Naming::from_snapshot(
+        snapshot.get("snapshot").context("missing snapshot")?,
+        &context,
+    );
     let directory = tempfile::tempdir()?;
     let request_env = format!("HERDRPP_PALETTE_REQUEST={}", directory.path().display());
     api.open_popup("command-palette", Some(&request_env))?;
     let cancelled = AtomicBool::new(false);
-    let selected = owner(api, directory.path(), &context, &cancelled)?;
+    let selected = owner(api, directory.path(), &context, naming, &cancelled)?;
     if let Some((catalog, selection)) = selected {
         let command = validate_selection(&catalog.items, &selection)?;
-        api::execute(api, &socket, command, &context, selection.input.as_deref())?;
+        api::execute(
+            api,
+            &socket,
+            command,
+            &context,
+            &catalog.naming,
+            selection.input.as_deref(),
+        )?;
     }
     Ok(())
 }

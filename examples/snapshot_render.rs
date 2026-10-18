@@ -9,8 +9,8 @@ fn main() -> Result<()> {
     let (width, height) = match case.as_str() {
         "empty-snapshot" | "loading" => (109, 20),
         "tiny-terminal" => (6, 1),
-        "palette-search" | "palette-empty" | "palette-rename" | "palette-confirm"
-        | "palette-loading" => (109, 20),
+        "palette-search" | "palette-empty" | "palette-rename" | "palette-create"
+        | "palette-confirm" | "palette-loading" => (109, 20),
         "palette-narrow" => (32, 12),
         _ => bail!("unknown controlled snapshot: {case}"),
     };
@@ -31,6 +31,11 @@ fn main() -> Result<()> {
     let mut palette = herdrpp::palette::app::App::new(
         context,
         vec![],
+        herdrpp::palette::naming::Naming {
+            tab_name: "Codex".into(),
+            tab_suggestion: "3".into(),
+            ..Default::default()
+        },
         Theme::parse("[theme]\nname = 'dracula'\n")?,
         None,
     );
@@ -40,12 +45,16 @@ fn main() -> Result<()> {
             "palette-search" | "palette-narrow" => "spl rgt",
             "palette-empty" => "nonexistent",
             "palette-rename" => "Rename Tab",
+            "palette-create" => "New Tab",
             "palette-confirm" => "Close Tab",
             _ => "",
         }
         .into(),
     );
-    if matches!(case.as_str(), "palette-rename" | "palette-confirm") {
+    if matches!(
+        case.as_str(),
+        "palette-rename" | "palette-create" | "palette-confirm"
+    ) {
         palette.handle(terminal_input::event::Event::Key(
             terminal_input::event::KeyEvent::new(
                 terminal_input::event::KeyCode::Enter,

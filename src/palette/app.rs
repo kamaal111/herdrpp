@@ -1,4 +1,7 @@
-use super::catalog::{self, Command, Context, Hit, Item};
+use super::{
+    catalog::{self, Command, Context, Hit, Item},
+    naming::Naming,
+};
 use crate::{picker::theme::Theme, search::matcher::FieldMatcher};
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
@@ -23,10 +26,11 @@ pub enum Action {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Mode {
     Search,
-    Rename {
+    Name {
         item: usize,
         input: String,
         error: bool,
+        selected: bool,
     },
     Confirm {
         item: usize,
@@ -35,6 +39,7 @@ pub enum Mode {
 
 pub struct App {
     pub context: Context,
+    pub naming: Naming,
     pub items: Vec<Item>,
     pub query: String,
     pub results: Vec<Hit>,
@@ -51,9 +56,16 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(context: Context, items: Vec<Item>, theme: Theme, warning: Option<String>) -> Self {
+    pub fn new(
+        context: Context,
+        items: Vec<Item>,
+        naming: Naming,
+        theme: Theme,
+        warning: Option<String>,
+    ) -> Self {
         let mut app = Self {
             context,
+            naming,
             items,
             query: String::new(),
             results: vec![],
@@ -110,8 +122,12 @@ impl App {
     }
     fn activate(&mut self) -> Action {
         match &mut self.mode {
-            Mode::Rename { item, input, error } => {
-                if input.trim().is_empty() {
+            Mode::Name {
+                item, input, error, ..
+            } => {
+                if matches!(self.items[*item].command, Command::Rename(_))
+                    && input.trim().is_empty()
+                {
                     *error = true;
                     return Action::Continue;
                 }
@@ -135,11 +151,18 @@ impl App {
                     return Action::Continue;
                 };
                 match self.items[item].command {
-                    Command::Rename(_) => {
-                        self.mode = Mode::Rename {
+                    Command::Rename(scope) | Command::Create(scope) => {
+                        let creating = matches!(self.items[item].command, Command::Create(_));
+                        self.mode = Mode::Name {
                             item,
-                            input: String::new(),
+                            input: if creating {
+                                self.naming.suggestion(scope)
+                            } else {
+                                self.naming.rename_name(scope)
+                            }
+                            .to_owned(),
                             error: false,
+                            selected: creating,
                         };
                         self.clear_hits();
                         Action::Continue
@@ -161,8 +184,14 @@ impl App {
     fn clear_input(&mut self) {
         match &mut self.mode {
             Mode::Search => self.set_query(String::new()),
-            Mode::Rename { input, error, .. } => {
+            Mode::Name {
+                input,
+                error,
+                selected,
+                ..
+            } => {
                 input.clear();
+                *selected = false;
                 *error = false;
             }
             Mode::Confirm { .. } => {}
@@ -179,11 +208,20 @@ impl App {
                 }
                 self.set_query(query);
             }
-            Mode::Rename { input, error, .. } => {
+            Mode::Name {
+                input,
+                error,
+                selected,
+                ..
+            } => {
+                if *selected {
+                    input.clear();
+                    *selected = false;
+                } else if text.is_none() {
+                    input.pop();
+                }
                 if let Some(text) = text {
                     input.push_str(text);
-                } else {
-                    input.pop();
                 }
                 *error = false;
             }

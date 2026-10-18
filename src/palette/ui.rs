@@ -112,16 +112,13 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 chunks[4],
             );
         }
-        Mode::Rename { item, input, error } => {
-            view::render_input(
-                frame,
-                chunks[0],
-                chunks[1],
-                palette,
-                input,
-                "Enter a name",
-                1,
-            );
+        Mode::Name {
+            item,
+            input,
+            error,
+            selected,
+        } => {
+            view::render_name_input(frame, chunks[0], chunks[1], palette, input, *selected);
             let message = if *error {
                 "Enter a nonblank name".to_string()
             } else {
@@ -132,7 +129,14 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 chunks[2],
             );
             frame.render_widget(
-                Paragraph::new("Enter Save  Esc Back").style(palette.base_style()),
+                Paragraph::new(
+                    if matches!(app.items[*item].command, super::catalog::Command::Create(_)) {
+                        "Enter Create  Esc Back"
+                    } else {
+                        "Enter Save  Esc Back"
+                    },
+                )
+                .style(palette.base_style()),
                 chunks[3],
             );
         }
@@ -206,7 +210,13 @@ pub fn run(directory: &Path, mut theme: Theme) -> Result<Option<Selection>> {
             }
         }
     };
-    let mut app = App::new(catalog.context, catalog.items, theme, catalog.warning);
+    let mut app = App::new(
+        catalog.context,
+        catalog.items,
+        catalog.naming,
+        theme,
+        catalog.warning,
+    );
     for event in pending {
         match app.handle(event) {
             Action::Cancel => return Ok(None),
