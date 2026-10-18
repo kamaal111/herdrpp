@@ -158,6 +158,16 @@ impl App {
             }
         }
     }
+    fn clear_input(&mut self) {
+        match &mut self.mode {
+            Mode::Search => self.set_query(String::new()),
+            Mode::Rename { input, error, .. } => {
+                input.clear();
+                *error = false;
+            }
+            Mode::Confirm { .. } => {}
+        }
+    }
     fn edit(&mut self, text: Option<&str>) {
         match &mut self.mode {
             Mode::Search => {
@@ -200,6 +210,7 @@ impl App {
                     {
                         self.navigate(1)
                     }
+                    _ if crate::search::input::is_clear_shortcut(&key) => self.clear_input(),
                     KeyCode::Backspace => self.edit(None),
                     KeyCode::Char(ch)
                         if !key.modifiers.intersects(

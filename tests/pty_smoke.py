@@ -95,6 +95,7 @@ def case(
         )
         try:
             output = read_until(master, b"Loading" if loading else b"results")
+            assert b"\x1b[>1u" in output, "enhanced keyboard input not requested"
             for report, color in appearance_reports:
                 os.write(master, report)
                 output += read_until(master, color)
@@ -118,6 +119,7 @@ def case(
             assert process.returncode == exit_code, process.returncode
             assert b"\x1b[?1000l" in output, "mouse reporting not disabled"
             assert b"\x1b[?2004l" in output, "paste reporting not disabled"
+            assert b"\x1b[<1u" in output, "enhanced keyboard input not restored"
             if "auto_switch = true" in theme:
                 assert b"\x1b[?2031h" in output, "appearance reporting not enabled"
                 assert b"\x1b[?2031l" in output, "appearance reporting not disabled"
@@ -176,6 +178,9 @@ def palette_case(keys, expected, loading=False):
 
 def main():
     palette_case(b"spl rgt\r", dict(id="herdr:split_right", input=None, confirmed=False))
+    palette_case(b"unmatched\x15spl rgt\r", dict(id="herdr:split_right", input=None, confirmed=False))
+    palette_case(b"unmatched\x1b[117;5uspl rgt\r", dict(id="herdr:split_right", input=None, confirmed=False))
+    palette_case(b"unmatched\x1b[127;9uspl rgt\r", dict(id="herdr:split_right", input=None, confirmed=False))
     palette_case(b"\x1b", None)
     palette_case(b"\x1b", None, loading=True)
     case(b"\x1b")
@@ -185,6 +190,9 @@ def main():
     case(b"codex\r", expected=[["workspace", "focus", "w3"]])
     case(b"server\r", mode="flat", expected=[["tab", "focus", "w2:t2"]])
     case(b"colorpicker\x1b[C\x1b[C\x1b[D\r", expected=[["tab", "focus", "w1:t9"]])
+    case(b"colorpicker\x1b[127;9u\r", expected=[["workspace", "focus", "w2"]])
+    case(b"colorpicker\x15\r", expected=[["workspace", "focus", "w2"]])
+    case(b"colorpicker\x1b[117;5u\r", expected=[["workspace", "focus", "w2"]])
     case(b"colorpicker\x1b[C\x1b[D\r", mode="flat", expected=[["tab", "focus", "w1:t8"]])
     case(b"\x1b[C\x1b[B\x1b[A\r", expected=[["workspace", "focus", "w1"]])
     case(b"colorpicker\t\t\t\t\r", expected=[["tab", "focus", "w1:t9"]])
@@ -244,7 +252,7 @@ def main():
         expected=[["tab", "focus", "w3:t1"]],
     )
     print(
-        "31 PTY smoke scenarios passed (Escape including slow discovery, filtering, workspace/tab focus, nested worktrees, flat mode, failure recovery; resize and terminal cleanup)"
+        "PTY smoke scenarios passed (Escape including slow discovery, filtering, workspace/tab focus, nested worktrees, flat mode, failure recovery; resize and terminal cleanup)"
     )
 
 

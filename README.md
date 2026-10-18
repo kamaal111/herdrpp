@@ -138,6 +138,7 @@ mode values are errors. See [plugin settings](examples/config.toml).
 | Input | Action |
 | --- | --- |
 | Typing / paste | Filter immediately |
+| Cmd+Backspace / Ctrl+U | Clear the search query |
 | ↑ / Ctrl+P | Previous workspace or worktree |
 | ↓ / Ctrl+N | Next workspace or worktree |
 | → / Tab | Next displayed tab from the highlighted tab, wrapping |
@@ -188,7 +189,8 @@ this version's coverage. Discovery failures leave built-ins available with a
 warning; reopen to refresh the catalog.
 
 Type or paste to filter, use ↑/↓ or Ctrl+P/N, and press Enter or click a result
-to run it. Rename commands ask for a nonblank name. Close commands require
+to run it. Cmd+Backspace or Ctrl+U clears the search or rename input.
+Rename commands ask for a nonblank name. Close commands require
 confirmation. Escape returns from a prompt or closes the palette; Ctrl+C cancels.
 Commands target the workspace, tab, and pane that opened the palette. A missing
 original target produces an error rather than switching to another target.
