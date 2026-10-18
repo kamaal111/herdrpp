@@ -8,7 +8,8 @@ just test-snapshots
 ```
 
 The picker harness captures a real Herdr 0.9.5 terminal session, exercises focus
-and pane preservation, and renders controlled loading/empty/tiny states. The
+and pane preservation, task allocation/restarts, and renders controlled
+loading/empty/tiny states plus task search and validation diagnostics. The
 sidebar harness uses isolated server and viewing configurations and fake GitHub
 responses to exercise PR colors, check icons, clearing, and config reload.
 Both load the same combined plugin. Docker uses pinned base images, system

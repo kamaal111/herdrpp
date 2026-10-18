@@ -76,6 +76,10 @@ impl Direction {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Command {
+    Task {
+        task: crate::tasks::config::Task,
+        root: std::path::PathBuf,
+    },
     SearchWorkspaces,
     Create(Scope),
     Rename(Scope),
@@ -100,7 +104,11 @@ pub struct Item {
 
 impl Item {
     pub fn fields(&self) -> [&str; 4] {
-        [&self.source, &self.id, &self.description, &self.title]
+        if matches!(self.command, Command::Task { .. }) {
+            ["", "", "", &self.title]
+        } else {
+            [&self.source, &self.id, &self.description, &self.title]
+        }
     }
 }
 

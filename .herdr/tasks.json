@@ -1,0 +1,48 @@
+[
+  {
+    "label": "just: build",
+    "command": "just",
+    "args": ["build"]
+  },
+  {
+    "label": "just: build-release",
+    "command": "just",
+    "args": ["build-release"]
+  },
+  {
+    "label": "just: format-check",
+    "command": "just",
+    "args": ["format-check"],
+    "new_tab": false
+  },
+  {
+    "label": "just: lint",
+    "command": "just",
+    "args": ["lint"]
+  },
+  {
+    "label": "just: test",
+    "command": "just",
+    "args": ["test"]
+  },
+  {
+    "label": "just: ready",
+    "command": "just",
+    "args": ["ready"]
+  },
+  {
+    "label": "just: test-focus",
+    "command": "just",
+    "args": ["test-focus"]
+  },
+  {
+    "label": "just: test-snapshots",
+    "command": "just",
+    "args": ["test-snapshots"]
+  },
+  {
+    "label": "just: list recipes",
+    "command": "just",
+    "new_tab": false
+  }
+]

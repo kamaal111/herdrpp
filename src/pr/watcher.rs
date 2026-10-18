@@ -178,7 +178,11 @@ impl Session {
         })
     }
 
-    fn same_session(&self) -> bool {
+    pub(crate) fn state_directory(&self) -> &Path {
+        &self.directory
+    }
+
+    pub(crate) fn same_session(&self) -> bool {
         fs::metadata(&self.socket).is_ok_and(|m| (m.dev(), m.ino()) == self.identity)
     }
 

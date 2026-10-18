@@ -41,7 +41,7 @@ class TestConfigure:
         assert all((token in self.config.read_text() for token in TOKENS))
         assert '"branch", "git_status"' in self.config.read_text()
         assert len(self.markers()) == 1
-        assert json.loads(self.markers()[0].read_text())["version"] == 2
+        assert json.loads(self.markers()[0].read_text())["version"] == 3
 
     def test_rerun_preserves_user_edits_bytes_and_modification_time(self):
         assert self.run_configure().returncode == 0
@@ -108,6 +108,7 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
     def test_already_configured_records_completion_without_rewriting(self):
         original = '[ui.sidebar.spaces]\nrows = [["$pr_open", "$pr_draft", "$pr_merged", "$pr_closed"]]\n[[keys.command]]\nkey = "cmd+p"\ntype = "plugin_action"\ncommand = "herdrpp.open"\n'
         original += '[[keys.command]]\nkey = "cmd+shift+k"\ntype = "plugin_action"\ncommand = "herdrpp.commands"\n'
+        original += '[[keys.command]]\nkey = "cmd+shift+r"\ntype = "plugin_action"\ncommand = "herdrpp.tasks"\n'
         self.config.write_text(original)
         before = self.config.stat().st_mtime_ns
         assert self.run_configure().returncode == 0
@@ -187,7 +188,7 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert self.run_configure().returncode == 0
         assert "# settings before migration" in self.config.read_text()
         assert "$pr_open" in self.config.read_text()
-        assert json.loads(marker.read_text())["version"] == 2
+        assert json.loads(marker.read_text())["version"] == 3
         assert (
             next(self.state.rglob("before-1.toml")).read_text()
             == "# original settings\n"
@@ -200,12 +201,12 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert self.run_configure().returncode == 0
         marker = self.markers()[0]
         state = json.loads(marker.read_text())
-        state["version"] = 3
+        state["version"] = 4
         marker.write_text(json.dumps(state))
         self.config.write_text("# customized by a newer version\n")
         assert self.run_configure().returncode == 0
         assert self.config.read_text() == "# customized by a newer version\n"
-        assert json.loads(marker.read_text())["version"] == 3
+        assert json.loads(marker.read_text())["version"] == 4
 
     def test_unreadable_config_target_is_not_marked(self):
         self.config.mkdir()
@@ -230,7 +231,7 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         result = self.run_configure()
         assert result.returncode == 0, result.stderr
         bindings = tomllib.loads(self.config.read_text())["keys"]["command"]
-        assert bindings == [{"key": "cmd+p", "type": "plugin_action", "command": "herdrpp.open", "description": "Search workspaces, worktrees and tabs"}, {"key":"cmd+shift+k", "type":"plugin_action", "command":"herdrpp.commands", "description":"Open command palette"}]
+        assert bindings == [{"key": "cmd+p", "type": "plugin_action", "command": "herdrpp.open", "description": "Search workspaces, worktrees and tabs"}, {"key":"cmd+shift+k", "type":"plugin_action", "command":"herdrpp.commands", "description":"Open command palette"}, {"key":"cmd+shift+r", "type":"plugin_action", "command":"herdrpp.tasks", "description":"Run workspace tasks"}]
 
     def test_conflicting_shortcut_is_preserved_and_reported_once(self):
         original = '[[keys.command]]\nkey = "cmd+p"\ntype = "command"\ncommand = "existing"\n'
@@ -284,7 +285,7 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert "herdrpp.open" not in self.config.read_text()
         assert "$pr_open" not in self.config.read_text()
         assert next(self.state.rglob("before-2.toml")).read_text() == original
-        assert json.loads(marker.read_text())["version"] == 2
+        assert json.loads(marker.read_text())["version"] == 3
         self.config.write_text("# intentionally removed palette\n")
         before = self.config.stat().st_mtime_ns
         assert self.run_configure().returncode == 0
@@ -297,7 +298,7 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         self.seed_version_one(original)
         result = self.run_configure()
         assert result.returncode == 0, result.stderr
-        assert self.config.read_text() == original
+        assert original in self.config.read_text()
         assert "Cmd+Shift+K is already bound" in result.stdout
         assert "herdrpp.commands" in result.stdout
         assert "prefix+shift+f" in result.stdout
@@ -307,14 +308,15 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         self.seed_version_one(original)
         result = self.run_configure()
         assert result.returncode == 0, result.stderr
-        assert self.config.read_text() == original
+        assert original in self.config.read_text()
         assert "already bound" in result.stdout
 
     def test_existing_equivalent_palette_binding_is_not_duplicated(self):
         original = '[keys]\ncommand=[{key="shift+super+k",type="plugin_action",command="herdrpp.commands"}]\n'
         self.seed_version_one(original)
         assert self.run_configure().returncode == 0
-        assert self.config.read_text() == original
+        import tomllib
+        assert tomllib.loads(self.config.read_text())["keys"]["command"][0] == {"key":"shift+super+k", "type":"plugin_action", "command":"herdrpp.commands"}
         assert self.config.read_text().count("herdrpp.commands") == 1
 
     def test_version_two_config_write_without_marker_can_retry_without_duplicates(self):
@@ -329,3 +331,48 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert self.config.read_text() == original
         assert self.config.stat().st_mtime_ns == before
         assert self.config.read_text().count("herdrpp.commands") == 1
+
+    def seed_version_two(self, original):
+        assert self.run_configure().returncode == 0
+        marker = self.markers()[0]
+        state = json.loads(marker.read_text())
+        state["version"] = 2
+        marker.write_text(json.dumps(state))
+        self.config.write_text(original)
+        return marker
+
+    def test_version_two_upgrade_adds_only_task_shortcut_and_backs_up_original(self):
+        original = '# custom\n[ui.sidebar.spaces]\nrows=[["branch"]]\n'
+        marker = self.seed_version_two(original)
+        result = self.run_configure()
+        assert result.returncode == 0, result.stderr
+        assert original in self.config.read_text()
+        assert "herdrpp.tasks" in self.config.read_text()
+        assert "herdrpp.commands" not in self.config.read_text()
+        assert "herdrpp.open" not in self.config.read_text()
+        assert "$pr_open" not in self.config.read_text()
+        assert next(self.state.rglob("before-3.toml")).read_text() == original
+        assert json.loads(marker.read_text())["version"] == 3
+
+    @pytest.mark.parametrize("key", ["cmd+shift+r", "SHIFT+CMD+R", "r+super+shift"])
+    def test_conflicting_task_shortcut_is_preserved_and_reported_once(self, key):
+        original = f'[[keys.command]]\nkey="{key}"\ntype="shell"\ncommand="existing"\n'
+        self.seed_version_two(original)
+        result = self.run_configure()
+        assert result.returncode == 0, result.stderr
+        assert self.config.read_text() == original
+        assert "Cmd+Shift+R is already bound" in result.stdout
+        assert "herdrpp.tasks" in result.stdout
+        assert "prefix+shift+r" in result.stdout
+        assert self.run_configure().stdout.count("already bound") == 0
+
+    def test_task_migration_retry_does_not_duplicate_shortcut(self):
+        marker = self.seed_version_two("# user config\n")
+        assert self.run_configure().returncode == 0
+        original = self.config.read_bytes()
+        state = json.loads(marker.read_text())
+        state["version"] = 2
+        marker.write_text(json.dumps(state))
+        assert self.run_configure().returncode == 0
+        assert self.config.read_bytes() == original
+        assert self.config.read_text().count("herdrpp.tasks") == 1

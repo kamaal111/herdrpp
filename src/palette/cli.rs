@@ -28,6 +28,8 @@ const LIMIT: u64 = 4 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize)]
 pub struct Catalog {
+    #[serde(default)]
+    pub tasks: bool,
     pub context: Context,
     pub naming: Naming,
     pub items: Vec<Item>,
@@ -111,6 +113,7 @@ fn load(api: &Herdr, context: &Context, mut naming: Naming, cancelled: &AtomicBo
         Err(error) => Some(format!("Plugin commands unavailable: {error:#}")),
     };
     Catalog {
+        tasks: false,
         context: context.clone(),
         naming,
         items,
@@ -124,11 +127,16 @@ fn owner(
     context: &Context,
     naming: Naming,
     cancelled: &AtomicBool,
+    tasks: bool,
 ) -> Result<Option<(Catalog, Selection)>> {
     thread::scope(|scope| {
         let (sender, receiver) = mpsc::channel();
         scope.spawn(move || {
-            let _ = sender.send(load(api, context, naming, cancelled));
+            let _ = sender.send(if tasks {
+                crate::tasks::load(api, context)
+            } else {
+                load(api, context, naming, cancelled)
+            });
         });
         let result = (|| {
             let mut catalog = None;
@@ -210,6 +218,10 @@ fn owner(
 }
 
 pub fn open(api: &Herdr) -> Result<()> {
+    open_mode(api, false)
+}
+
+pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
     let context: Context = serde_json::from_str(
         &env::var("HERDR_PLUGIN_CONTEXT_JSON")
             .context("launch commands through a Herdr plugin action")?,
@@ -217,20 +229,21 @@ pub fn open(api: &Herdr) -> Result<()> {
     .context("invalid Herdr plugin context")?;
     let socket =
         PathBuf::from(env::var_os("HERDR_SOCKET_PATH").context("missing Herdr session socket")?);
-    let snapshot = decode(&api.call(&["api", "snapshot"])?)?;
-    api::validate_context(
-        snapshot.get("snapshot").context("missing snapshot")?,
-        &context,
-    )?;
-    let naming = Naming::from_snapshot(
-        snapshot.get("snapshot").context("missing snapshot")?,
-        &context,
-    );
+    let snapshot = api.raw_snapshot()?;
+    api::validate_context(&snapshot, &context)?;
+    let naming = Naming::from_snapshot(&snapshot, &context);
     let directory = tempfile::tempdir()?;
     let request_env = format!("HERDRPP_PALETTE_REQUEST={}", directory.path().display());
-    api.open_popup("command-palette", Some(&request_env))?;
+    api.open_popup(
+        if tasks {
+            "task-palette"
+        } else {
+            "command-palette"
+        },
+        Some(&request_env),
+    )?;
     let cancelled = AtomicBool::new(false);
-    let selected = owner(api, directory.path(), &context, naming, &cancelled)?;
+    let selected = owner(api, directory.path(), &context, naming, &cancelled, tasks)?;
     if let Some((catalog, selection)) = selected {
         let command = validate_selection(&catalog.items, &selection)?;
         api::execute(
@@ -246,6 +259,10 @@ pub fn open(api: &Herdr) -> Result<()> {
 }
 
 pub fn pick() -> Result<()> {
+    pick_mode(false)
+}
+
+pub fn pick_mode(tasks: bool) -> Result<()> {
     let directory = PathBuf::from(
         env::var_os("HERDRPP_PALETTE_REQUEST")
             .context("launch pick-command through the command palette")?,
@@ -256,7 +273,7 @@ pub fn pick() -> Result<()> {
     }
     let terminal = crate::search::terminal::popup_terminal_path()?;
     write_json(&directory.join("terminal.json"), &terminal)?;
-    let selection = ui::run(&directory, theme)?;
+    let selection = ui::run_mode(&directory, theme, tasks)?;
     write_json(&directory.join("selection.json"), &selection)?;
     // Exit exactly as the workspace picker does. The owner waits until Herdr
     // releases this popup's PTY before invoking any selected command.

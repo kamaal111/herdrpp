@@ -19,6 +19,26 @@ use terminal_input::event::{
     self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
 
+pub fn diagnostic_lines(message: &str, width: u16) -> Vec<String> {
+    use unicode_width::UnicodeWidthChar;
+    let mut lines = Vec::new();
+    for line in message.split('\n') {
+        let mut current = String::new();
+        let mut used = 0;
+        for ch in line.chars() {
+            let size = ch.width().unwrap_or(0);
+            if used + size > usize::from(width.max(1)) && !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+                used = 0;
+            }
+            current.push(ch);
+            used += size;
+        }
+        lines.push(current);
+    }
+    lines
+}
+
 pub fn render(frame: &mut Frame<'_>, app: &mut App) {
     let palette = app.theme.palette();
     frame.render_widget(Paragraph::new("").style(palette.base_style()), frame.area());
@@ -31,6 +51,22 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
         );
         return;
     }
+    if app.tasks
+        && let Some(message) = &app.warning
+    {
+        let body = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
+        let wrapped = diagnostic_lines(message, body.width);
+        let lines = wrapped.len().saturating_sub(usize::from(body.height));
+        let paragraph = Paragraph::new(wrapped.join("\n")).style(palette.base_style());
+        app.diagnostics_max = u16::try_from(lines).unwrap_or(u16::MAX);
+        app.diagnostics_offset = app.diagnostics_offset.min(app.diagnostics_max);
+        frame.render_widget(paragraph.scroll((app.diagnostics_offset, 0)), body);
+        frame.render_widget(
+            Paragraph::new("↑↓/PgUp/PgDn Scroll · Esc closes").style(palette.base_style()),
+            Rect::new(area.x, area.y + area.height - 1, area.width, 1),
+        );
+        return;
+    }
     let chunks = view::layout(area);
     match &app.mode {
         Mode::Search => {
@@ -40,13 +76,26 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 chunks[1],
                 palette,
                 &app.query,
-                "Search commands",
+                if app.tasks {
+                    "Search tasks"
+                } else {
+                    "Search commands"
+                },
                 app.results.len(),
             );
             app.results_area = chunks[2];
             app.ensure_visible(usize::from(chunks[2].height));
             if app.results.is_empty() {
-                view::render_empty(frame, chunks[2], palette, "No matching commands");
+                view::render_empty(
+                    frame,
+                    chunks[2],
+                    palette,
+                    if app.tasks {
+                        "No matching tasks"
+                    } else {
+                        "No matching commands"
+                    },
+                );
             }
             for (y, index) in (app.offset..app.results.len())
                 .take(usize::from(chunks[2].height))
@@ -89,8 +138,12 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 app.hits.push((row, index));
             }
             frame.render_widget(
-                Paragraph::new("↑↓/Ctrl+P,N Commands  Enter Run")
-                    .style(palette.base_style().fg(palette.overlay1)),
+                Paragraph::new(if app.tasks {
+                    "↑↓/Ctrl+P,N Tasks  Enter Run"
+                } else {
+                    "↑↓/Ctrl+P,N Commands  Enter Run"
+                })
+                .style(palette.base_style().fg(palette.overlay1)),
                 chunks[3],
             );
             let details = app
@@ -98,9 +151,24 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 .and_then(|index| app.results.get(index))
                 .map(|hit| {
                     let item = &app.items[hit.item];
-                    format!("Command Palette · {} {}", item.source, item.description)
+                    format!(
+                        "{} · {} {}",
+                        if app.tasks {
+                            "Task Palette"
+                        } else {
+                            "Command Palette"
+                        },
+                        item.source,
+                        item.description
+                    )
                 })
-                .unwrap_or_else(|| "Command Palette".into());
+                .unwrap_or_else(|| {
+                    if app.tasks {
+                        "Task Palette".into()
+                    } else {
+                        "Command Palette".into()
+                    }
+                });
             let message = app.warning.as_deref().unwrap_or(&details);
             frame.render_widget(
                 Paragraph::new(Line::from(view::label_spans(
@@ -175,7 +243,11 @@ pub fn render_loading(frame: &mut Frame<'_>, palette: Palette) -> Rect {
     view::render_loading(frame, frame.area(), palette, "Loading commands…")
 }
 
-pub fn run(directory: &Path, mut theme: Theme) -> Result<Option<Selection>> {
+pub fn run(directory: &Path, theme: Theme) -> Result<Option<Selection>> {
+    run_mode(directory, theme, false)
+}
+
+pub fn run_mode(directory: &Path, mut theme: Theme, tasks: bool) -> Result<Option<Selection>> {
     let (_screen, mut terminal) = Screen::enter(theme.auto_switch())?;
     let mut pending = Vec::new();
     let catalog: Catalog = loop {
@@ -185,7 +257,11 @@ pub fn run(directory: &Path, mut theme: Theme) -> Result<Option<Selection>> {
         }
         let mut cancel_area = Rect::default();
         terminal.draw(|frame| {
-            cancel_area = render_loading(frame, theme.palette());
+            cancel_area = if tasks {
+                view::render_loading(frame, frame.area(), theme.palette(), "Loading tasks…")
+            } else {
+                render_loading(frame, theme.palette())
+            };
         })?;
         if event::poll(Duration::from_millis(20))? {
             let input = event::read()?;
@@ -217,6 +293,7 @@ pub fn run(directory: &Path, mut theme: Theme) -> Result<Option<Selection>> {
         theme,
         catalog.warning,
     );
+    app.tasks = catalog.tasks;
     for event in pending {
         match app.handle(event) {
             Action::Cancel => return Ok(None),

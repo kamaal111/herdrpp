@@ -38,6 +38,9 @@ pub enum Mode {
 }
 
 pub struct App {
+    pub tasks: bool,
+    pub diagnostics_offset: u16,
+    pub diagnostics_max: u16,
     pub context: Context,
     pub naming: Naming,
     pub items: Vec<Item>,
@@ -64,6 +67,9 @@ impl App {
         warning: Option<String>,
     ) -> Self {
         let mut app = Self {
+            tasks: false,
+            diagnostics_offset: 0,
+            diagnostics_max: 0,
             context,
             naming,
             items,
@@ -229,6 +235,45 @@ impl App {
         }
     }
     pub fn handle(&mut self, event: Event) -> Action {
+        if self.tasks && self.warning.is_some() {
+            match event {
+                Event::ThemeModeChanged(appearance) => self.theme.set_appearance(appearance),
+                Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
+                    KeyCode::Esc => return Action::Cancel,
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        return Action::Cancel;
+                    }
+                    KeyCode::Down | KeyCode::PageDown => {
+                        self.diagnostics_offset = self
+                            .diagnostics_offset
+                            .saturating_add(if key.code == KeyCode::PageDown { 10 } else { 1 })
+                            .min(self.diagnostics_max)
+                    }
+                    KeyCode::Up | KeyCode::PageUp => {
+                        self.diagnostics_offset = self
+                            .diagnostics_offset
+                            .saturating_sub(if key.code == KeyCode::PageUp { 10 } else { 1 })
+                    }
+                    KeyCode::Home => self.diagnostics_offset = 0,
+                    KeyCode::End => self.diagnostics_offset = self.diagnostics_max,
+                    _ => {}
+                },
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollDown => {
+                        self.diagnostics_offset = self
+                            .diagnostics_offset
+                            .saturating_add(3)
+                            .min(self.diagnostics_max)
+                    }
+                    MouseEventKind::ScrollUp => {
+                        self.diagnostics_offset = self.diagnostics_offset.saturating_sub(3)
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+            return Action::Continue;
+        }
         match event {
             Event::Resize(_, _) => self.clear_hits(),
             Event::ThemeModeChanged(appearance) => self.theme.set_appearance(appearance),

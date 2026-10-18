@@ -93,6 +93,14 @@ impl Herdr {
         Ok(output.stdout)
     }
 
+    pub(crate) fn raw_snapshot(&self) -> Result<Value> {
+        let result = decode(&self.call(&["api", "snapshot"])?)?;
+        result
+            .get("snapshot")
+            .cloned()
+            .context("missing Herdr snapshot")
+    }
+
     pub fn snapshot(&self) -> Result<Snapshot> {
         parse_snapshot(&self.call(&["api", "snapshot"])?)
     }

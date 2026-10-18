@@ -15,7 +15,7 @@ for argument in "$@"; do
     --dry-run) dry_run=1 ;;
     --help|-h)
       printf '%s\n' 'Usage: install.sh [--plugin-only | --config-only] [--dry-run]' \
-        'Default: install the latest release through Herdr and initialize local sidebar tokens and the picker and command palette shortcuts.' \
+        'Default: install the latest release through Herdr and initialize local sidebar tokens and the picker, command palette, and task shortcuts.' \
         '--plugin-only: install on the server without changing viewing config.' \
         '--config-only: configure the viewing computer without registering a plugin.' \
         'Requires curl, Python 3, and Rust/Cargo; plugin installation also needs Herdr, git, and gh.' \

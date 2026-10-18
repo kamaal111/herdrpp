@@ -9,8 +9,8 @@ fn main() -> Result<()> {
     let (width, height) = match case.as_str() {
         "empty-snapshot" | "loading" => (109, 20),
         "tiny-terminal" => (6, 1),
-        "palette-search" | "palette-empty" | "palette-rename" | "palette-create"
-        | "palette-confirm" | "palette-loading" => (109, 20),
+        "tasks-search" | "tasks-diagnostics" | "palette-search" | "palette-empty"
+        | "palette-rename" | "palette-create" | "palette-confirm" | "palette-loading" => (109, 20),
         "palette-narrow" => (32, 12),
         _ => bail!("unknown controlled snapshot: {case}"),
     };
@@ -62,10 +62,35 @@ fn main() -> Result<()> {
             ),
         ));
     }
+    if case.starts_with("tasks-") {
+        let task = herdrpp::tasks::config::Task {
+            label: "just: dev-server".into(),
+            command: "just".into(),
+            args: vec!["dev-server".into()],
+            new_tab: true,
+        };
+        palette.tasks = true;
+        palette.items = vec![herdrpp::palette::catalog::Item {
+            id: "task:0".into(),
+            title: task.label.clone(),
+            source: "Task".into(),
+            description: "just dev-server".into(),
+            command: herdrpp::palette::catalog::Command::Task {
+                task,
+                root: "/project".into(),
+            },
+        }];
+        palette.set_query("dev".into());
+        if case == "tasks-diagnostics" {
+            palette.items.clear();
+            palette.set_query(String::new());
+            palette.warning = Some("Fix /project/.herdr/tasks.json\n\nTask 1 (\"test\"), new_tab: expected true or false, received string. Remove the quotes.\n\nTask 2 (\"build\"), command: expected a nonblank string; add a quoted string value.\n\nSave the file and reopen tasks to reload.".into());
+        }
+    }
     terminal.draw(|frame| {
         if case == "palette-loading" {
             herdrpp::palette::ui::render_loading(frame, palette.theme.palette());
-        } else if case.starts_with("palette-") {
+        } else if case.starts_with("palette-") || case.starts_with("tasks-") {
             herdrpp::palette::ui::render(frame, &mut palette);
         } else if case == "loading" {
             ui::render_loading(frame, app.theme.palette());

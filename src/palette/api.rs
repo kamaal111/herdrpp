@@ -83,7 +83,7 @@ pub fn validate_context(snapshot: &Value, context: &Context) -> Result<()> {
 pub fn arguments(command: &Command, context: &Context) -> Result<Option<Vec<String>>> {
     let required = |scope: Scope| scope.id(context).context("command target is unavailable");
     let args: Vec<String> = match command {
-        Command::SearchWorkspaces => return Ok(None),
+        Command::SearchWorkspaces | Command::Task { .. } => return Ok(None),
         Command::Plugin { .. } => return Ok(None),
         Command::Create(_) | Command::Rename(_) => return Ok(None),
         Command::Close(scope) => vec![scope.cli().into(), "close".into(), required(*scope)?.into()],
@@ -168,12 +168,12 @@ pub fn execute(
     naming: &Naming,
     input: Option<&str>,
 ) -> Result<()> {
-    let snapshot = decode(&api.call(&["api", "snapshot"])?)?;
-    validate_context(
-        snapshot.get("snapshot").context("missing Herdr snapshot")?,
-        context,
-    )?;
+    let snapshot = api.raw_snapshot()?;
+    validate_context(&snapshot, context)?;
     match command {
+        Command::Task { task, root } => {
+            crate::tasks::runner::execute(api, socket, context, root, task)
+        }
         Command::SearchWorkspaces => api.open(),
         Command::Create(scope) => {
             let (method, params) = create_request(*scope, context, naming, input)?;

@@ -24,7 +24,7 @@ def cli(tmp_path, release_binary):
     return run, log, tmp_path / "state"
 
 
-@pytest.mark.parametrize("args", [("open", "extra"), ("commands", "extra"), ("pick-command", "extra"), ("configure", "extra"),
+@pytest.mark.parametrize("args", [("tasks", "extra"), ("pick-task", "extra"), ("open", "extra"), ("commands", "extra"), ("pick-command", "extra"), ("configure", "extra"),
                                   ("--version", "extra"), ("unknown",)])
 def test_invalid_arguments_have_no_herdr_or_configuration_side_effects(cli, args):
     run, log, state = cli
@@ -41,6 +41,7 @@ def test_help_lists_both_features_without_a_session(cli, args):
     result = run(*args)
     assert result.returncode == 0
     assert "Open command palette" in result.stdout
+    assert "Run workspace tasks" in result.stdout
     assert "Search workspaces, worktrees and tabs" in result.stdout
     assert "Refresh workspace PR metadata once" in result.stdout
     assert not log.exists()
