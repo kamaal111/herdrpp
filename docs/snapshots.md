@@ -40,6 +40,16 @@ For one picker case, pass its name, for example
 uv run --locked pytest tests/test_sidebar_snapshots.py --record --snapshot-case pr-open-failed
 ```
 
+The README's command and task showcases use real isolated popup sessions. The
+task fixture runs harmless sample commands, checks current-tab execution and
+task restart destination reuse, then captures the task list over running output.
+To refresh only these two images and verify repeated captures:
+
+```sh
+just record-picker-snapshots showcase-commands showcase-tasks
+sh tests/snapshots/run.sh --repeat 2 showcase-commands showcase-tasks
+```
+
 Inspect every changed image, then run comparison mode again. Never record in CI
 or replace a baseline merely to hide a failing behavior. Recording is rejected
 when `CI` is set. All recording and capture commands use isolated test settings,
