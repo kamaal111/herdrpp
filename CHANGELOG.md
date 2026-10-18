@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/kamaal111/herdrpp/compare/v0.3.1...v0.4.0) (2026-10-18)
+
+
+### Features
+
+* **palette:** prefill names and prompt before creation ([f72850e](https://github.com/kamaal111/herdrpp/commit/f72850e43203690e9087872e5529abb71433cdb2))
+
 ## [0.3.1](https://github.com/kamaal111/herdrpp/compare/v0.3.0...v0.3.1) (2026-10-18)
 
 
