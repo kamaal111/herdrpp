@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value};
 
 // Bump only for a new, targeted config migration, never for a package release.
-const CONFIG_VERSION: u32 = 4;
+const CONFIG_VERSION: u32 = 5;
 const FNV1A_64_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV1A_64_PRIME: u64 = 0x100000001b3;
 const TOKENS: [(&str, &str); 4] = [
@@ -250,6 +250,67 @@ fn migrate_ci(original: &str) -> Result<String> {
     Ok(document.to_string())
 }
 
+fn format_sidebar_statuses(original: &str) -> Result<String> {
+    let mut document = original
+        .parse::<DocumentMut>()
+        .context("parse Herdr config TOML")?;
+    let Some(rows) = document
+        .get_mut("ui")
+        .and_then(|ui| ui.get_mut("sidebar"))
+        .and_then(|sidebar| sidebar.get_mut("spaces"))
+        .and_then(|spaces| spaces.get_mut("rows"))
+    else {
+        return Ok(original.to_owned());
+    };
+    let rows = rows
+        .as_array_mut()
+        .context("sidebar rows must be an array")?;
+    validate(rows)?;
+    let mut changed = false;
+    for row in rows.iter_mut() {
+        let row = row.as_array_mut().context("sidebar row")?;
+        let Some((newline, indent)) = row.iter().find_map(|value| {
+            let prefix = value.decor().prefix()?.as_str()?;
+            let (_, indent) = prefix.rsplit_once('\n')?;
+            if !indent.chars().all(char::is_whitespace) {
+                return None;
+            }
+            Some((
+                if prefix.contains("\r\n") {
+                    "\r\n"
+                } else {
+                    "\n"
+                },
+                indent.to_owned(),
+            ))
+        }) else {
+            continue;
+        };
+        for value in row.iter_mut() {
+            let status = token(value).is_some_and(|name| {
+                TOKENS.iter().any(|(token, _)| *token == name)
+                    || crate::pr::herdr::CI_TOKENS
+                        .iter()
+                        .any(|(_, token, _)| name.strip_prefix('$') == Some(*token))
+            });
+            let prefix = value
+                .decor()
+                .prefix()
+                .and_then(|raw| raw.as_str())
+                .unwrap_or("");
+            if status && !prefix.contains('\n') && prefix.chars().all(char::is_whitespace) {
+                value.decor_mut().set_prefix(format!("{newline}{indent}"));
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        Ok(document.to_string())
+    } else {
+        Ok(original.to_owned())
+    }
+}
+
 fn normalized_chord(key: &str) -> Vec<String> {
     let mut parts: Vec<_> = key
         .split('+')
@@ -458,6 +519,10 @@ pub fn run() -> Result<()> {
     if completed < 4 {
         backups.push((4, updated.clone()));
         updated = migrate_ci(&updated)?;
+    }
+    if completed < 5 {
+        backups.push((5, updated.clone()));
+        updated = format_sidebar_statuses(&updated)?;
     }
     if original.as_deref() != Some(&updated) {
         if original.is_some() {
