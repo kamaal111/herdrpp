@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/kamaal111/herdrpp/compare/v0.5.0...v0.6.0) (2026-10-19)
+
+
+### Features
+
+* **status:** show CI on the repository default branch ([623ee5c](https://github.com/kamaal111/herdrpp/commit/623ee5cbf46a902a76bdf1bd9d04030b41df165a))
+
 ## [0.5.0](https://github.com/kamaal111/herdrpp/compare/v0.4.0...v0.5.0) (2026-10-18)
 
 
