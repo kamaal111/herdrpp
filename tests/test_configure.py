@@ -46,7 +46,7 @@ class TestConfigure:
         assert all((token in self.config.read_text() for token in TOKENS))
         assert '"branch", "git_status"' in self.config.read_text()
         assert len(self.markers()) == 1
-        assert json.loads(self.markers()[0].read_text())["version"] == 4
+        assert json.loads(self.markers()[0].read_text())["version"] == 5
 
     def test_rerun_preserves_user_edits_bytes_and_modification_time(self):
         assert self.run_configure().returncode == 0
@@ -193,7 +193,7 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert self.run_configure().returncode == 0
         assert "# settings before migration" in self.config.read_text()
         assert "$pr_open" in self.config.read_text()
-        assert json.loads(marker.read_text())["version"] == 4
+        assert json.loads(marker.read_text())["version"] == 5
         assert (
             next(self.state.rglob("before-1.toml")).read_text()
             == "# original settings\n"
@@ -206,12 +206,12 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert self.run_configure().returncode == 0
         marker = self.markers()[0]
         state = json.loads(marker.read_text())
-        state["version"] = 5
+        state["version"] = 6
         marker.write_text(json.dumps(state))
         self.config.write_text("# customized by a newer version\n")
         assert self.run_configure().returncode == 0
         assert self.config.read_text() == "# customized by a newer version\n"
-        assert json.loads(marker.read_text())["version"] == 5
+        assert json.loads(marker.read_text())["version"] == 6
 
     def test_unreadable_config_target_is_not_marked(self):
         self.config.mkdir()
@@ -292,7 +292,7 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert "herdrpp.open" not in self.config.read_text()
         assert "$pr_open" not in self.config.read_text()
         assert next(self.state.rglob("before-2.toml")).read_text() == original
-        assert json.loads(marker.read_text())["version"] == 4
+        assert json.loads(marker.read_text())["version"] == 5
         self.config.write_text("# intentionally removed palette\n")
         before = self.config.stat().st_mtime_ns
         assert self.run_configure().returncode == 0
@@ -361,7 +361,7 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert "herdrpp.open" not in self.config.read_text()
         assert "$pr_open" not in self.config.read_text()
         assert next(self.state.rglob("before-3.toml")).read_text() == original
-        assert json.loads(marker.read_text())["version"] == 4
+        assert json.loads(marker.read_text())["version"] == 5
 
     @pytest.mark.parametrize("key", ["cmd+shift+r", "SHIFT+CMD+R", "r+super+shift"])
     def test_conflicting_task_shortcut_is_preserved_and_reported_once(self, key):
@@ -413,9 +413,9 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         marker.write_text(json.dumps(state))
         assert self.run_configure().returncode == 0
         assert self.config.read_text() == original
-        assert json.loads(marker.read_text())["version"] == 4
+        assert json.loads(marker.read_text())["version"] == 5
 
-    def test_version_three_upgrade_has_one_ci_migration_and_backup(self):
+    def test_version_three_upgrade_preserves_ci_setup_backup(self):
         original = '# custom\n[ui.sidebar.spaces]\nrows=[["workspace", {token="$mine", fg="#abc"}]]\n'
         marker = self.seed_version_two(original)
         state = json.loads(marker.read_text())
@@ -426,8 +426,8 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         rows = tomllib.loads(self.config.read_text())["ui"]["sidebar"]["spaces"]["rows"]
         assert rows == [["workspace", *CI_STYLES, {"token": "$mine", "fg": "#abc"}]]
         assert next(self.state.rglob("before-4.toml")).read_text() == original
-        assert list(self.state.rglob("before-5.toml")) == []
-        assert json.loads(marker.read_text())["version"] == 4
+        assert tomllib.loads(next(self.state.rglob("before-5.toml")).read_text())["ui"]["sidebar"]["spaces"]["rows"] == rows
+        assert json.loads(marker.read_text())["version"] == 5
         self.config.write_text(original)
         assert self.run_configure().returncode == 0
         assert self.config.read_text() == original
@@ -441,3 +441,68 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert self.run_configure().returncode != 0
         assert self.config.read_text() == original
         assert json.loads(marker.read_text())["version"] == 3
+
+
+    def seed_version_four(self, original):
+        assert self.run_configure().returncode == 0
+        marker = self.markers()[0]
+        state = json.loads(marker.read_text())
+        state["version"] = 4
+        marker.write_text(json.dumps(state))
+        self.config.write_text(original)
+        return marker
+
+    @pytest.mark.parametrize("indent", ["    ", "\t"])
+    def test_multiline_status_tokens_get_separate_lines_with_existing_indentation(self, indent):
+        original = ('[ui.sidebar.spaces]\nrows = [\n  [\n'
+            + indent + '"state_icon", "workspace",\n'
+            + indent + '{ token = "$pr_open", fg = "#238636" },\n'
+            + indent + '{ token = "$pr_closed", fg = "#f85149" }, { token = "$ci_passed", fg = "#238636" }, { token = "$ci_failed", fg = "#f85149" }, { token = "$ci_pending", fg = "#d29922" },\n'
+            + '  ],\n  ["branch", "git_status"],\n]\n')
+        expected = original.replace('}, { token = "$ci_', '},\n' + indent + '{ token = "$ci_')
+        marker = self.seed_version_four(original)
+        assert self.run_configure().returncode == 0
+        assert self.config.read_text() == expected
+        assert json.loads(marker.read_text())["version"] == 5
+        assert next(self.state.rglob("before-5.toml")).read_text() == original
+        before = self.config.stat().st_mtime_ns
+        assert self.run_configure().returncode == 0
+        assert self.config.stat().st_mtime_ns == before
+
+    def test_status_formatting_preserves_comments_custom_styles_and_unrelated_rows(self):
+        original = ('# theme comment\n[theme]\nname="dracula" # untouched\n'
+            '[ui.sidebar.spaces]\nrows = [\n  [\n    "workspace",\n'
+            '    # status comment\n    {token="$pr_open", fg="#abc", bold=true}, {token="$ci_pending", fg="#def"}, # end comment\n'
+            '    "$mine",\n  ],\n  ["branch", "git_status"],\n] # row comment\n')
+        expected = original.replace('}, {token="$ci_pending"', '},\n    {token="$ci_pending"')
+        self.seed_version_four(original)
+        assert self.run_configure().returncode == 0
+        assert self.config.read_text() == expected
+
+    @pytest.mark.parametrize("original", [
+        '[ui.sidebar.spaces]\nrows=[["workspace", {token="$ci_passed", fg="#abc"}]]\n',
+        '[ui.sidebar.spaces]\nrows=[\n  [\n    "workspace", "$mine",\n  ],\n]\n',
+        '# intentionally removed sidebar\n'])
+    def test_formatting_migration_leaves_compact_and_removed_displays_untouched(self, original):
+        marker = self.seed_version_four(original)
+        before = self.config.stat().st_mtime_ns
+        assert self.run_configure().returncode == 0
+        assert self.config.read_text() == original
+        assert self.config.stat().st_mtime_ns == before
+        assert json.loads(marker.read_text())["version"] == 5
+
+
+    def test_new_ci_tokens_follow_existing_multiline_layout(self):
+        original = ('[ui.sidebar.spaces]\nrows = [\n  [\n    "workspace",\n'
+            '    { token = "$pr_closed", fg = "#f85149" },\n  ],\n]\n')
+        expected = original.replace('\n  ],',
+            '\n    { token = "$ci_passed", fg = "#238636" },'
+            '\n    { token = "$ci_failed", fg = "#f85149" },'
+            '\n    { token = "$ci_pending", fg = "#d29922" },\n  ],')
+        marker = self.seed_version_two(original)
+        state = json.loads(marker.read_text())
+        state["version"] = 3
+        marker.write_text(json.dumps(state))
+        assert self.run_configure().returncode == 0
+        assert self.config.read_text() == expected
+        assert json.loads(marker.read_text())["version"] == 5
