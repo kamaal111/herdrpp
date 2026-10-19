@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/kamaal111/herdrpp/compare/v0.6.0...v0.7.0) (2026-10-19)
+
+
+### Features
+
+* **palette:** open workspace pull requests in the default browser ([726b62b](https://github.com/kamaal111/herdrpp/commit/726b62b6fd2ad1b13428c8981058ee6fa8e3fa1c))
+
+
+### Bug Fixes
+
+* **config:** format sidebar status tokens on separate lines ([83086d7](https://github.com/kamaal111/herdrpp/commit/83086d712cf814f646dee04bda1891600f7d7847))
+
 ## [0.6.0](https://github.com/kamaal111/herdrpp/compare/v0.5.0...v0.6.0) (2026-10-19)
 
 
