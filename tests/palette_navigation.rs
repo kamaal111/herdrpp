@@ -61,6 +61,31 @@ fn typing_paste_and_backspace_filter_and_empty_enter_does_nothing() {
 }
 
 #[test]
+fn view_pull_request_enter_executes_without_a_prompt() {
+    let mut app = app();
+    app.items.push(catalog::Item {
+        id: "herdr:view_pull_request".into(),
+        title: "View Pull Request".into(),
+        source: "Herdr".into(),
+        description: String::new(),
+        command: catalog::Command::ViewPullRequest {
+            number: 123,
+            directory: "/projects/herdrpp".into(),
+        },
+    });
+    app.set_query("View Pull Request".into());
+    assert_eq!(
+        app.handle(key(KeyCode::Enter)),
+        Action::Execute(herdrpp::palette::app::Selection {
+            id: "herdr:view_pull_request".into(),
+            input: None,
+            confirmed: false,
+        })
+    );
+    assert_eq!(app.mode, Mode::Search);
+}
+
+#[test]
 fn clear_shortcuts_restore_commands_selection_scroll_and_click_targets() {
     for (code, modifiers) in [
         (KeyCode::Backspace, KeyModifiers::SUPER),

@@ -81,6 +81,10 @@ pub enum Command {
         root: std::path::PathBuf,
     },
     SearchWorkspaces,
+    ViewPullRequest {
+        number: u64,
+        directory: std::path::PathBuf,
+    },
     Create(Scope),
     Rename(Scope),
     Close(Scope),

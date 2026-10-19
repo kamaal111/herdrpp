@@ -522,8 +522,23 @@ fn lookup_pr(checkout: &Checkout, base_repository: &str) -> Result<Option<PrSumm
     let Some(number) = newest_pr(&output, checkout)? else {
         return Ok(None);
     };
+    let output = pr_view(
+        checkout,
+        base_repository,
+        number,
+        "number,state,isDraft,statusCheckRollup",
+    )?;
+    parse_summary(&output, number).map(Some)
+}
+
+fn pr_view(
+    checkout: &Checkout,
+    base_repository: &str,
+    number: u64,
+    fields: &str,
+) -> Result<Vec<u8>> {
     let repo = format!("{}/{}", checkout.host, base_repository);
-    let output = run(
+    run(
         gh(checkout).args([
             "pr",
             "view",
@@ -531,11 +546,34 @@ fn lookup_pr(checkout: &Checkout, base_repository: &str) -> Result<Option<PrSumm
             "--repo",
             &repo,
             "--json",
-            "number,state,isDraft,statusCheckRollup",
+            fields,
         ]),
         Duration::from_secs(20),
-    )?;
-    parse_summary(&output, number).map(Some)
+    )
+}
+
+pub fn pull_request_url(directory: &Path, number: u64) -> Result<String> {
+    ensure!(number > 0, "invalid GitHub PR number");
+    let checkout = checkout(directory)?.context("workspace checkout is unavailable")?;
+    let (checkout, _, base_repository) = resolve_repository(&checkout)?;
+    let repo = format!("{}/{}", checkout.host, base_repository);
+    let output = pr_view(&checkout, &base_repository, number, "number,url")?;
+    #[derive(Deserialize)]
+    struct PrUrl {
+        number: u64,
+        url: String,
+    }
+    let pr: PrUrl = serde_json::from_slice(&output).context("parse GitHub PR URL")?;
+    ensure!(pr.number == number, "GitHub PR URL number mismatch");
+    let target = pr
+        .url
+        .strip_prefix("https://")
+        .or_else(|| pr.url.strip_prefix("http://"));
+    ensure!(
+        target.is_some_and(|target| target.eq_ignore_ascii_case(&format!("{repo}/pull/{number}"))),
+        "GitHub PR URL does not match the resolved repository and number"
+    );
+    Ok(pr.url)
 }
 
 const CHECK_FIELDS: &str = "nodes { __typename ... on CheckRun { status conclusion } ... on StatusContext { state } } pageInfo { hasNextPage endCursor }";
