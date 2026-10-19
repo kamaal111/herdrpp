@@ -14,9 +14,10 @@ pub struct Checkout {
     pub head_repo: String,
     pub head_branch: String,
     pub host: String,
+    pub remotes: Vec<Remote>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Remote {
     pub host: String,
     pub repository: String,
@@ -82,16 +83,33 @@ pub fn checkout(directory: &Path) -> Result<Option<Checkout>> {
     if branch.is_empty() {
         return Ok(None);
     }
-    let remote_name = git(
+    let remote_names = git(&root, &["remote"])?;
+    let mut remotes = Vec::new();
+    for name in remote_names.lines() {
+        if let Some(remote) = parse_remote(&git(&root, &["remote", "get-url", name])?)
+            && !remotes.contains(&remote)
+        {
+            remotes.push(remote);
+        }
+    }
+    if remotes.is_empty() {
+        return Ok(None);
+    }
+    let tracking = git(
         &root,
         &["config", "--get", &format!("branch.{branch}.remote")],
     )
-    .ok()
-    .filter(|s| !s.is_empty() && s != ".")
-    .unwrap_or_else(|| "origin".into());
-    let remote_url = git(&root, &["remote", "get-url", &remote_name]).unwrap_or_default();
-    let Some(remote) = parse_remote(&remote_url) else {
-        return Ok(None);
+    .ok();
+    let selected = match tracking.as_deref() {
+        Some(".") => return Ok(None),
+        Some(name) if !name.is_empty() => {
+            let Some(remote) = parse_remote(&git(&root, &["remote", "get-url", name])?) else {
+                return Ok(None);
+            };
+            Some(remote)
+        }
+        _ if remotes.len() == 1 => remotes.first().cloned(),
+        _ => None,
     };
     let head_branch = git(
         &root,
@@ -104,8 +122,12 @@ pub fn checkout(directory: &Path) -> Result<Option<Checkout>> {
         root,
         branch,
         head_branch,
-        head_repo: remote.repository,
-        host: remote.host,
+        head_repo: selected
+            .as_ref()
+            .map(|r| r.repository.clone())
+            .unwrap_or_default(),
+        host: selected.map(|r| r.host).unwrap_or_default(),
+        remotes,
     }))
 }
 
@@ -114,6 +136,13 @@ struct Repository {
     #[serde(rename = "nameWithOwner")]
     name_with_owner: String,
     url: String,
+    #[serde(rename = "defaultBranchRef")]
+    default_branch_ref: Option<BranchRef>,
+}
+
+#[derive(Deserialize)]
+struct BranchRef {
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -170,8 +199,12 @@ fn gh(checkout: &Checkout) -> Command {
     command
         .current_dir(&checkout.root)
         .env_remove("GH_REPO")
-        .env("GH_HOST", &checkout.host)
         .env("GH_PROMPT_DISABLED", "1");
+    if checkout.host.is_empty() {
+        command.env_remove("GH_HOST");
+    } else {
+        command.env("GH_HOST", &checkout.host);
+    }
     command
 }
 
@@ -205,6 +238,35 @@ pub struct PrSummary {
     pub number: u64,
     pub lifecycle: Lifecycle,
     pub ci: Option<CiStatus>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceStatus {
+    PullRequest(PrSummary),
+    DefaultBranch { ci: Option<CiStatus> },
+}
+
+#[derive(Debug, Clone)]
+pub struct LookupFailure {
+    pub default_branch: bool,
+    pub message: String,
+}
+
+impl std::fmt::Display for LookupFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for LookupFailure {}
+
+impl From<anyhow::Error> for LookupFailure {
+    fn from(error: anyhow::Error) -> Self {
+        Self {
+            default_branch: false,
+            message: format!("{error:#}"),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -274,6 +336,18 @@ enum CommitStatus {
 }
 
 impl Check {
+    fn has_started(&self) -> bool {
+        matches!(
+            self,
+            Self::CheckRun {
+                status: CheckStatus::InProgress | CheckStatus::Completed,
+                ..
+            } | Self::StatusContext {
+                state: CommitStatus::Success | CommitStatus::Error | CommitStatus::Failure
+            }
+        )
+    }
+
     fn result(self) -> Result<Option<CiStatus>> {
         Ok(match self {
             Self::CheckRun {
@@ -307,10 +381,7 @@ pub fn parse_summary(bytes: &[u8], expected_number: u64) -> Result<PrSummary> {
         PrState::Open if details.is_draft => Lifecycle::Draft,
         PrState::Open => Lifecycle::Open,
     };
-    let mut ci = None;
-    for check in details.status_check_rollup.unwrap_or_default() {
-        ci = ci.max(check.result()?);
-    }
+    let (ci, _) = aggregate_checks(details.status_check_rollup.unwrap_or_default())?;
     Ok(PrSummary {
         number: details.number,
         lifecycle,
@@ -318,27 +389,113 @@ pub fn parse_summary(bytes: &[u8], expected_number: u64) -> Result<PrSummary> {
     })
 }
 
-pub fn lookup(checkout: &Checkout) -> Result<Option<PrSummary>> {
+fn aggregate_checks(checks: Vec<Check>) -> Result<(Option<CiStatus>, bool)> {
+    let mut ci = None;
+    let mut started = false;
+    for check in checks {
+        let has_started = check.has_started();
+        let result = check.result()?;
+        started |= has_started && result.is_some();
+        ci = ci.max(result);
+    }
+    Ok((ci, started))
+}
+
+pub fn lookup(checkout: &Checkout) -> std::result::Result<Option<WorkspaceStatus>, LookupFailure> {
+    let (resolved, default_branch, base_repository) = resolve_repository(checkout)?;
+    if default_branch {
+        return lookup_ci(&resolved, &resolved.head_branch)
+            .map(|ci| Some(WorkspaceStatus::DefaultBranch { ci }))
+            .map_err(|error| LookupFailure {
+                default_branch: true,
+                message: format!("{error:#}"),
+            });
+    }
+    lookup_pr(&resolved, &base_repository)
+        .map(|pr| pr.map(WorkspaceStatus::PullRequest))
+        .map_err(Into::into)
+}
+
+fn resolve_repository(checkout: &Checkout) -> Result<(Checkout, bool, String)> {
     let repository: Repository = serde_json::from_slice(&run(
-        gh(checkout).args(["repo", "view", "--json", "nameWithOwner,url"]),
+        gh(checkout).args([
+            "repo",
+            "view",
+            "--json",
+            "nameWithOwner,url,defaultBranchRef",
+        ]),
         Duration::from_secs(15),
     )?)
     .context("resolve GitHub base repository")?;
-    let base = parse_remote(&repository.url).context("invalid GitHub repository URL")?;
+    let base = repository.remote()?;
+    let mut resolved = checkout.clone();
+    if resolved.head_repo.is_empty() {
+        ensure!(
+            checkout
+                .remotes
+                .iter()
+                .any(|remote| remote.host.eq_ignore_ascii_case(&base.host)
+                    && remote.repository.eq_ignore_ascii_case(&base.repository)),
+            "GitHub CLI repository does not match a configured remote"
+        );
+        resolved.host = base.host.clone();
+        resolved.head_repo = base.repository.clone();
+    }
+    let checkout = &resolved;
     ensure!(
         base.host.eq_ignore_ascii_case(&checkout.host),
         "GitHub base/head hosts differ"
     );
-    ensure!(
-        base.repository
-            .eq_ignore_ascii_case(&repository.name_with_owner),
-        "GitHub repository identity mismatch"
-    );
+    let head_repository = if base.repository.eq_ignore_ascii_case(&checkout.head_repo) {
+        repository
+    } else {
+        let name = format!("{}/{}", checkout.host, checkout.head_repo);
+        let head: Repository = serde_json::from_slice(&run(
+            gh(checkout).args([
+                "repo",
+                "view",
+                &name,
+                "--json",
+                "nameWithOwner,url,defaultBranchRef",
+            ]),
+            Duration::from_secs(15),
+        )?)
+        .context("resolve GitHub head repository")?;
+        let remote = head.remote()?;
+        ensure!(
+            remote.host.eq_ignore_ascii_case(&checkout.host)
+                && remote.repository.eq_ignore_ascii_case(&checkout.head_repo),
+            "GitHub head repository identity mismatch"
+        );
+        head
+    };
+    let default_branch = head_repository
+        .default_branch_ref
+        .context("GitHub repository has no default branch")?
+        .name
+        == checkout.head_branch;
+    Ok((resolved, default_branch, base.repository))
+}
+
+impl Repository {
+    fn remote(&self) -> Result<Remote> {
+        let remote = parse_remote(&self.url).context("invalid GitHub repository URL")?;
+        ensure!(
+            remote
+                .repository
+                .eq_ignore_ascii_case(&self.name_with_owner),
+            "GitHub repository identity mismatch"
+        );
+        Ok(remote)
+    }
+}
+
+fn lookup_pr(checkout: &Checkout, base_repository: &str) -> Result<Option<PrSummary>> {
     let (owner, _) = checkout
         .head_repo
         .split_once('/')
         .context("invalid head repository")?;
-    let endpoint = format!("repos/{}/pulls", repository.name_with_owner);
+    let endpoint = format!("repos/{}/pulls", base_repository);
     let head = format!("head={owner}:{}", checkout.head_branch);
     let output = run(
         gh(checkout).args([
@@ -365,7 +522,7 @@ pub fn lookup(checkout: &Checkout) -> Result<Option<PrSummary>> {
     let Some(number) = newest_pr(&output, checkout)? else {
         return Ok(None);
     };
-    let repo = format!("{}/{}", checkout.host, repository.name_with_owner);
+    let repo = format!("{}/{}", checkout.host, base_repository);
     let output = run(
         gh(checkout).args([
             "pr",
@@ -379,4 +536,194 @@ pub fn lookup(checkout: &Checkout) -> Result<Option<PrSummary>> {
         Duration::from_secs(20),
     )?;
     parse_summary(&output, number).map(Some)
+}
+
+const CHECK_FIELDS: &str = "nodes { __typename ... on CheckRun { status conclusion } ... on StatusContext { state } } pageInfo { hasNextPage endCursor }";
+
+#[derive(Deserialize)]
+struct Graphql<T> {
+    data: Option<T>,
+    errors: Option<Vec<serde_json::Value>>,
+}
+
+fn graphql_data<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T> {
+    let response: Graphql<T> = serde_json::from_slice(bytes).context("parse GitHub CI response")?;
+    ensure!(
+        response.errors.is_none_or(|errors| errors.is_empty()),
+        "GitHub CI query returned errors"
+    );
+    response.data.context("GitHub CI query returned no data")
+}
+
+#[derive(Deserialize)]
+struct HistoryData {
+    repository: HistoryRepository,
+}
+
+#[derive(Deserialize)]
+struct HistoryRepository {
+    #[serde(rename = "ref")]
+    branch: HistoryRef,
+}
+
+#[derive(Deserialize)]
+struct HistoryRef {
+    target: HistoryTarget,
+}
+
+#[derive(Deserialize)]
+struct HistoryTarget {
+    history: History,
+}
+
+#[derive(Deserialize)]
+struct History {
+    nodes: Vec<CiCommit>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CiCommit {
+    oid: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    status_check_rollup: Option<Rollup>,
+}
+
+#[derive(Deserialize)]
+struct Rollup {
+    contexts: Contexts,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Contexts {
+    nodes: Vec<Check>,
+    page_info: PageInfo,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PageInfo {
+    has_next_page: bool,
+    end_cursor: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ContextData {
+    repository: ContextRepository,
+}
+
+#[derive(Deserialize)]
+struct ContextRepository {
+    object: CiCommit,
+}
+
+fn ci_history(bytes: &[u8]) -> Result<Vec<CiCommit>> {
+    let data: HistoryData = graphql_data(bytes)?;
+    let commits = data.repository.branch.target.history.nodes;
+    ensure!(commits.len() <= 10, "GitHub CI history exceeds 10 commits");
+    Ok(commits)
+}
+
+fn commit_ci(commit: CiCommit) -> Result<(Option<CiStatus>, bool)> {
+    ensure!(!commit.oid.is_empty(), "GitHub CI commit has no identity");
+    let Some(rollup) = commit.status_check_rollup else {
+        return Ok((None, false));
+    };
+    ensure!(
+        !rollup.contexts.page_info.has_next_page,
+        "incomplete GitHub CI contexts"
+    );
+    aggregate_checks(rollup.contexts.nodes)
+}
+
+fn select_ci(commits: impl IntoIterator<Item = Result<CiCommit>>) -> Result<Option<CiStatus>> {
+    let mut queued = None;
+    for commit in commits {
+        let (ci, started) = commit_ci(commit?)?;
+        if started {
+            return Ok(ci);
+        }
+        queued = queued.or(ci);
+    }
+    Ok(queued)
+}
+
+pub fn parse_ci_history(bytes: &[u8]) -> Result<Option<CiStatus>> {
+    select_ci(ci_history(bytes)?.into_iter().map(Ok))
+}
+
+fn ci_query(checkout: &Checkout, query: &str, fields: &[(&str, &str)]) -> Result<Vec<u8>> {
+    let (owner, name) = checkout
+        .head_repo
+        .split_once('/')
+        .context("invalid head repository")?;
+    let mut command = gh(checkout);
+    command.args([
+        "api",
+        "graphql",
+        "--hostname",
+        &checkout.host,
+        "-f",
+        &format!("query={query}"),
+        "-f",
+        &format!("owner={owner}"),
+        "-f",
+        &format!("name={name}"),
+    ]);
+    for (key, value) in fields {
+        command.args(["-f", &format!("{key}={value}")]);
+    }
+    run(&mut command, Duration::from_secs(20))
+}
+
+fn lookup_ci(checkout: &Checkout, branch: &str) -> Result<Option<CiStatus>> {
+    let query = format!(
+        "query($owner:String!,$name:String!,$branch:String!) {{ repository(owner:$owner,name:$name) {{ ref(qualifiedName:$branch) {{ target {{ ... on Commit {{ history(first:10) {{ nodes {{ oid statusCheckRollup {{ contexts(first:100) {{ {CHECK_FIELDS} }} }} }} }} }} }} }} }} }}"
+    );
+    let bytes = ci_query(
+        checkout,
+        &query,
+        &[("branch", &format!("refs/heads/{branch}"))],
+    )?;
+    let commits = ci_history(&bytes)?;
+    let page_query = format!(
+        "query($owner:String!,$name:String!,$oid:GitObjectID!,$cursor:String!) {{ repository(owner:$owner,name:$name) {{ object(oid:$oid) {{ ... on Commit {{ oid statusCheckRollup {{ contexts(first:100,after:$cursor) {{ {CHECK_FIELDS} }} }} }} }} }} }}"
+    );
+    select_ci(commits.into_iter().map(|mut commit| {
+        if let Some(rollup) = &mut commit.status_check_rollup {
+            while rollup.contexts.page_info.has_next_page {
+                let cursor = rollup
+                    .contexts
+                    .page_info
+                    .end_cursor
+                    .as_deref()
+                    .context("GitHub CI contexts have no next cursor")?;
+                let bytes = ci_query(
+                    checkout,
+                    &page_query,
+                    &[("oid", &commit.oid), ("cursor", cursor)],
+                )?;
+                let data: ContextData = graphql_data(&bytes)?;
+                ensure!(
+                    data.repository.object.oid == commit.oid,
+                    "GitHub CI commit identity changed"
+                );
+                let next = data
+                    .repository
+                    .object
+                    .status_check_rollup
+                    .context("GitHub CI rollup disappeared")?
+                    .contexts;
+                ensure!(
+                    !next.page_info.has_next_page
+                        || next.page_info.end_cursor.as_deref() != Some(cursor),
+                    "GitHub CI cursor did not advance"
+                );
+                rollup.contexts.nodes.extend(next.nodes);
+                rollup.contexts.page_info = next.page_info;
+            }
+        }
+        Ok(commit)
+    }))
 }

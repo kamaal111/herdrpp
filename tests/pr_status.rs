@@ -1,4 +1,4 @@
-use herdrpp::pr::github::{CiStatus, Lifecycle, parse_summary};
+use herdrpp::pr::github::{CiStatus, Lifecycle, parse_ci_history, parse_summary};
 use serde_json::{Value, json};
 
 fn summary(state: &str, draft: bool, checks: Value) -> Value {
@@ -207,4 +207,111 @@ fn malformed_unknown_and_mismatched_details_are_errors() {
         )
         .is_err()
     );
+}
+
+fn history(checks: Vec<Value>) -> Value {
+    json!({"data": {"repository": {"ref": {"target": {"history": {"nodes":
+        checks.into_iter().enumerate().map(|(index, checks)| json!({
+            "oid": format!("{:040x}", index + 1), "statusCheckRollup": {"contexts": {
+                "nodes": checks, "pageInfo": {"hasNextPage": false, "endCursor": null}
+            }}
+        })).collect::<Vec<_>>()
+    }}}}}})
+}
+
+fn ci(checks: Vec<Value>) -> Option<CiStatus> {
+    parse_ci_history(history(checks).to_string().as_bytes()).unwrap()
+}
+
+#[test]
+fn ci_uses_newest_started_commit_instead_of_newer_queued_checks() {
+    assert_eq!(
+        ci(vec![
+            json!([check("QUEUED", None)]),
+            json!([check("COMPLETED", Some("FAILURE"))])
+        ]),
+        Some(CiStatus::Failed)
+    );
+    assert_eq!(
+        ci(vec![
+            json!([]),
+            json!([check("IN_PROGRESS", None)]),
+            json!([check("COMPLETED", Some("SUCCESS"))])
+        ]),
+        Some(CiStatus::Pending)
+    );
+}
+
+#[test]
+fn ci_aggregates_all_checks_on_selected_commit_without_combining_commits() {
+    assert_eq!(
+        ci(vec![
+            json!([check("COMPLETED", Some("SUCCESS")), check("QUEUED", None)]),
+            json!([check("COMPLETED", Some("FAILURE"))])
+        ]),
+        Some(CiStatus::Pending)
+    );
+    assert_eq!(
+        ci(vec![
+            json!([check("COMPLETED", Some("SUCCESS"))]),
+            json!([check("COMPLETED", Some("FAILURE"))])
+        ]),
+        Some(CiStatus::Passed)
+    );
+}
+
+#[test]
+fn ci_uses_queued_fallback_and_ignores_neutral_completed_checks_for_selection() {
+    assert_eq!(
+        ci(vec![
+            json!([check("COMPLETED", Some("SKIPPED")), check("QUEUED", None)]),
+            json!([check("COMPLETED", Some("SUCCESS"))])
+        ]),
+        Some(CiStatus::Passed)
+    );
+    assert_eq!(
+        ci(vec![json!([check("QUEUED", None)]), json!([])]),
+        Some(CiStatus::Pending)
+    );
+    assert_eq!(ci(vec![json!([check("COMPLETED", Some("NEUTRAL"))])]), None);
+}
+
+#[test]
+fn ci_handles_legacy_statuses_and_empty_history() {
+    assert_eq!(
+        ci(vec![
+            json!([{"__typename":"StatusContext","state":"PENDING"}]),
+            json!([{"__typename":"StatusContext","state":"ERROR"}])
+        ]),
+        Some(CiStatus::Failed)
+    );
+    assert_eq!(ci(vec![]), None);
+    assert_eq!(ci(vec![json!([]); 10]), None);
+}
+
+#[test]
+fn ci_rejects_excess_history_errors_and_incomplete_contexts() {
+    assert!(parse_ci_history(history(vec![json!([]); 11]).to_string().as_bytes()).is_err());
+    assert!(parse_ci_history(br#"{"data":null,"errors":[{"message":"unavailable"}]}"#).is_err());
+    assert!(parse_ci_history(b"{}").is_err());
+    let mut value = history(vec![json!([])]);
+    value["data"]["repository"]["ref"]["target"]["history"]["nodes"][0]["statusCheckRollup"]["contexts"]
+        ["pageInfo"]["hasNextPage"] = json!(true);
+    assert!(parse_ci_history(value.to_string().as_bytes()).is_err());
+}
+
+#[test]
+fn ci_rejects_missing_rollup_but_accepts_explicit_null() {
+    let mut value = history(vec![json!([])]);
+    value["data"]["repository"]["ref"]["target"]["history"]["nodes"][0]["statusCheckRollup"] =
+        Value::Null;
+    assert_eq!(
+        parse_ci_history(value.to_string().as_bytes()).unwrap(),
+        None
+    );
+    value["data"]["repository"]["ref"]["target"]["history"]["nodes"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("statusCheckRollup");
+    assert!(parse_ci_history(value.to_string().as_bytes()).is_err());
 }

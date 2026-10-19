@@ -1,5 +1,5 @@
 use crate::pr::{
-    github::{self, Checkout, PrSummary},
+    github::{self, Checkout, LookupFailure, WorkspaceStatus},
     herdr,
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -409,8 +409,10 @@ impl Session {
             return Ok(());
         };
         let snapshot = herdr::snapshot()?;
-        let mut cache: HashMap<Checkout, std::result::Result<Option<PrSummary>, String>> =
-            HashMap::new();
+        let mut cache: HashMap<
+            Checkout,
+            std::result::Result<Option<WorkspaceStatus>, LookupFailure>,
+        > = HashMap::new();
         let mut failures = 0;
         let mut reported = 0;
         for workspace in &snapshot.workspaces {
@@ -426,12 +428,9 @@ impl Session {
                 let pr = match &original {
                     Some(checkout) => cache
                         .entry(checkout.clone())
-                        .or_insert_with(|| {
-                            github::lookup(checkout).map_err(|error| format!("{error:#}"))
-                        })
-                        .clone()
-                        .map_err(anyhow::Error::msg)?,
-                    None => None,
+                        .or_insert_with(|| github::lookup(checkout))
+                        .clone(),
+                    None => Ok(None),
                 };
                 let fresh = herdr::snapshot()?;
                 let Some(current) = fresh
@@ -449,12 +448,19 @@ impl Session {
                 if !self.same_session() || (!manual && (self.stopped() || !herdr::enabled()?)) {
                     return Ok(());
                 }
-                let pr = if original == current_checkout {
-                    pr
+                if original != current_checkout {
+                    herdr::report(&workspace.workspace_id, None)?;
                 } else {
-                    None
-                };
-                herdr::report(&workspace.workspace_id, pr)?;
+                    match pr {
+                        Ok(status) => herdr::report(&workspace.workspace_id, status)?,
+                        Err(error) => {
+                            if error.default_branch {
+                                herdr::clear_pr(&workspace.workspace_id)?;
+                            }
+                            return Err(error.into());
+                        }
+                    }
+                }
                 reported += 1;
                 Ok(())
             })();
@@ -496,8 +502,13 @@ pub fn check() -> Result<()> {
         println!(
             "{}: {}",
             workspace.workspace_id,
-            pr.map(|pr| format!("#{}", pr.number))
-                .unwrap_or_else(|| "no associated PR".into())
+            match pr {
+                Some(WorkspaceStatus::PullRequest(pr)) => format!("#{}", pr.number),
+                Some(WorkspaceStatus::DefaultBranch { ci: Some(ci) }) =>
+                    format!("CI {}", ci.icon()),
+                Some(WorkspaceStatus::DefaultBranch { ci: None }) => "no CI status".into(),
+                None => "no associated PR".into(),
+            }
         );
     }
     Ok(())

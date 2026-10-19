@@ -2,7 +2,7 @@ id = "herdrpp"
 name = "herdr++"
 version = "0.5.0"
 min_herdr_version = "0.9.5"
-description = "Search workspaces and tabs, and show GitHub PR status"
+description = "Search workspaces and tabs, and show GitHub PR and CI status"
 platforms = ["macos", "linux"]
 
 [[build]]
@@ -18,17 +18,17 @@ command = ["./target/release/herdrpp", "open"]
 
 [[actions]]
 id = "start"
-title = "Start automatic PR refresh"
+title = "Start automatic PR/CI refresh"
 command = ["./target/release/herdrpp", "start"]
 
 [[actions]]
 id = "refresh"
-title = "Refresh workspace PR status"
+title = "Refresh workspace PR and CI status"
 command = ["./target/release/herdrpp", "refresh"]
 
 [[actions]]
 id = "stop"
-title = "Stop automatic PR refresh"
+title = "Stop automatic PR/CI refresh"
 command = ["./target/release/herdrpp", "stop"]
 
 [[panes]]

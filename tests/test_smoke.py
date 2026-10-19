@@ -38,9 +38,12 @@ else:
     if (root / "fail").exists():
         print("GitHub unavailable", file=sys.stderr)
         sys.exit(1)
-    if args[:2] == ["repo", "view"]:
+    if args[:2] == ["repo", "view"] and args[2] != "--json":
+        repository = "/".join(args[2].split("/")[1:])
+        print(json.dumps({"nameWithOwner": repository, "url": "https://" + args[2], "defaultBranchRef": {"name": "main"}}))
+    elif args[:2] == ["repo", "view"]:
         print((root / "repository.json").read_text() if (root / "repository.json").exists()
-              else '{"nameWithOwner":"alice/project","url":"https://github.com/alice/project"}')
+              else '{"nameWithOwner":"alice/project","url":"https://github.com/alice/project","defaultBranchRef":{"name":"main"}}')
     elif args[:2] == ["pr", "view"]:
         if (root / "details-fail").exists():
             print("PR details unavailable", file=sys.stderr)
@@ -52,6 +55,15 @@ else:
             selected = next(pr for pr in prs if pr["number"] == int(args[2]))
             print(json.dumps({"number": selected["number"], "state": selected["state"].upper(),
                 "isDraft": False, "statusCheckRollup": []}))
+    elif args[:2] == ["api", "graphql"]:
+        if (root / "ci-fail").exists():
+            sys.exit(1)
+        if (root / "branch-switch").exists():
+            subprocess.run(["git", "checkout", "-q", "other"], check=True)
+        if (root / "remote-switch").exists():
+            subprocess.run(["git", "remote", "set-url", "company", "https://github.com/bob/other.git"], check=True)
+        response = "contexts.json" if any(arg.startswith("oid=") for arg in args) else "history.json"
+        print((root / response).read_text())
     elif args[0] == "api":
         if (root / "branch-switch").exists():
             subprocess.run(["git", "checkout", "-q", "other"], check=True)
@@ -276,6 +288,9 @@ class TestPluginSmoke:
                 "pr_merged",
                 "--token",
                 "pr_closed=#125",
+                "--clear-token", "ci_passed",
+                "--clear-token", "ci_failed",
+                "--clear-token", "ci_pending",
                 "--ttl-ms",
                 "180000",
             ]
@@ -404,6 +419,9 @@ class TestPluginSmoke:
                 "pr_merged",
                 "--clear-token",
                 "pr_closed",
+                "--clear-token", "ci_passed",
+                "--clear-token", "ci_failed",
+                "--clear-token", "ci_pending",
                 "--clear-token",
                 "pr_number",
             ]
@@ -907,3 +925,201 @@ class TestPluginSmoke:
         assert "1 workspaces, 1 tabs" in result.stdout
         assert [kind for kind, _ in self.calls() if kind == "gh"] == []
         assert not (self.root / "reports").exists()
+
+
+    def set_default_branch(self, name="trunk"):
+        self.git("branch", "-m", name)
+        self.git("remote", "rename", "origin", "company")
+        self.write("repository.json", {"nameWithOwner": "alice/project",
+            "url": "https://github.com/alice/project", "defaultBranchRef": {"name": name}})
+        self.write("prs.json", [pr(125, branch=name)])
+
+    def set_history(self, checks):
+        self.write("history.json", {"data": {"repository": {"ref": {"target": {
+            "history": {"nodes": [
+                {"oid": f"{index:040x}", "statusCheckRollup": {"contexts": {
+                    "nodes": contexts, "pageInfo": {"hasNextPage": False, "endCursor": None}}}}
+                for index, contexts in enumerate(checks, 1)]}}}}}})
+
+    @pytest.mark.parametrize("branch", ["main", "master", "trunk"])
+    def test_default_branch_shows_ci_and_never_queries_historical_pr(self, branch):
+        self.set_default_branch(branch)
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        self.run_plugin("refresh")
+        report = self.reports()[0]
+        assert "ci_passed=CI ✅" in report
+        assert "pr_number=#125" not in report
+        assert all(token in report for token in ("pr_number", "pr_open", "pr_draft", "pr_merged", "pr_closed"))
+        assert [args for kind, args in self.calls() if kind == "gh" and "state=all" in args] == []
+
+    @pytest.mark.parametrize("context,active,icon", [({"__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": None}, "ci_pending", "🟡"), ({"__typename": "StatusContext", "state": "SUCCESS"}, "ci_passed", "✅"), ({"__typename": "StatusContext", "state": "FAILURE"}, "ci_failed", "❌")])
+    def test_default_branch_skips_queued_commit_for_previous_active_ci(self, context, active, icon):
+        self.set_default_branch()
+        self.set_history([
+            [{"__typename": "CheckRun", "status": "QUEUED", "conclusion": None}],
+            [context]])
+        self.run_plugin("refresh")
+        assert f"{active}=CI {icon}" in self.reports()[0]
+
+    def test_default_branch_ci_failure_clears_pr_without_renewing_ci(self):
+        self.set_default_branch()
+        (self.root / "ci-fail").touch()
+        assert self.run_plugin("refresh", check=False).returncode != 0
+        report = self.reports()[0]
+        assert "pr_number" in report
+        assert "ci_passed" not in report
+        assert "--ttl-ms" not in report
+
+    def test_default_branch_change_during_ci_lookup_discards_status(self):
+        self.set_default_branch()
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        (self.root / "branch-switch").touch()
+        self.run_plugin("refresh")
+        assert "ci_passed=CI ✅" not in self.reports()[0]
+        assert "ci_passed" in self.reports()[0]
+
+
+    @pytest.mark.parametrize("contexts,expected", [
+        ([{"__typename": "CheckRun", "status": "QUEUED", "conclusion": None}], "ci_pending=CI 🟡"),
+        ([], "ci_passed"),
+        ([{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SKIPPED"}], "ci_passed")])
+    def test_default_branch_queued_fallback_and_no_actionable_checks(self, contexts, expected):
+        self.set_default_branch()
+        self.set_history([contexts] * 10)
+        self.run_plugin("refresh")
+        assert expected in self.reports()[0]
+        queries = [args for kind, args in self.calls() if kind == "gh" and args[:2] == ["api", "graphql"]]
+        assert len(queries) == 1
+        assert "history(first:10)" in next(arg for arg in queries[0] if arg.startswith("query="))
+
+    def test_tracking_alias_uses_arbitrary_remote_with_multiple_candidates(self):
+        self.set_default_branch()
+        self.git("branch", "-m", "local-alias")
+        self.git("remote", "add", "secondary", "https://github.com/bob/other.git")
+        self.git("config", "branch.local-alias.remote", "company")
+        self.git("config", "branch.local-alias.merge", "refs/heads/trunk")
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        self.run_plugin("refresh")
+        assert "ci_passed=CI ✅" in self.reports()[0]
+
+    def test_multiple_remotes_without_tracking_use_github_cli_selection(self):
+        self.set_default_branch()
+        self.git("remote", "add", "secondary", "https://github.com/bob/other.git")
+        self.set_history([[{"__typename": "StatusContext", "state": "FAILURE"}]])
+        self.run_plugin("refresh")
+        assert "ci_failed=CI ❌" in self.reports()[0]
+
+    def test_cli_selection_outside_configured_remotes_is_rejected(self):
+        self.set_default_branch()
+        self.git("remote", "add", "secondary", "https://github.com/bob/other.git")
+        self.write("repository.json", {"nameWithOwner": "stranger/project", "url": "https://github.com/stranger/project", "defaultBranchRef": {"name": "trunk"}})
+        result = self.run_plugin("refresh", check=False)
+        assert result.returncode != 0
+        assert "does not match a configured remote" in result.stderr
+        assert not (self.root / "reports").exists()
+
+    def test_default_branch_context_pagination_includes_later_failure(self):
+        self.set_default_branch()
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        history = json.loads((self.root / "history.json").read_text())
+        history["data"]["repository"]["ref"]["target"]["history"]["nodes"][0]["statusCheckRollup"]["contexts"]["pageInfo"] = {"hasNextPage": True, "endCursor": "page-1"}
+        self.write("history.json", history)
+        self.write("contexts.json", {"data": {"repository": {"object": {
+            "oid": f"{1:040x}", "statusCheckRollup": {"contexts": {
+                "nodes": [{"__typename": "StatusContext", "state": "FAILURE"}],
+                "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}}})
+        self.run_plugin("refresh")
+        assert "ci_failed=CI ❌" in self.reports()[0]
+        queries = [args for kind, args in self.calls() if kind == "gh" and args[:2] == ["api", "graphql"]]
+        assert len(queries) == 2
+        assert "cursor=page-1" in queries[1]
+        assert f"oid={1:040x}" in queries[1]
+
+    def test_default_branch_read_only_check_uses_ci_without_metadata(self):
+        self.set_default_branch()
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        self.env["GH_REPO"] = "stranger/project"
+        assert self.run_plugin("check-pr").stdout == "w1: CI ✅\n"
+        assert not (self.root / "reports").exists()
+        assert not (self.root / "state").exists()
+
+    def test_default_branch_duplicate_checkout_shares_ci_lookup(self):
+        self.set_default_branch()
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        self.set_workspaces([self.workspace("w1", self.repo), self.workspace("w2", self.repo)])
+        self.run_plugin("refresh")
+        assert len(self.reports()) == 2
+        assert len([args for kind, args in self.calls() if kind == "gh" and args[:2] == ["api", "graphql"]]) == 1
+
+    def test_remote_change_during_ci_lookup_discards_status(self):
+        self.set_default_branch()
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        (self.root / "remote-switch").touch()
+        self.run_plugin("refresh")
+        assert "ci_passed=CI ✅" not in self.reports()[0]
+        assert "ci_passed" in self.reports()[0]
+
+    def test_ci_and_pr_transitions_clear_the_other_display(self):
+        self.set_default_branch()
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        self.run_plugin("refresh")
+        self.git("checkout", "-q", "-b", "feature")
+        self.write("prs.json", [pr(123)])
+        self.run_plugin("refresh")
+        self.git("checkout", "-q", "trunk")
+        self.run_plugin("refresh")
+        assert "ci_passed=CI ✅" in self.reports()[0]
+        assert "pr_number=#123" in self.reports()[1]
+        assert "ci_passed" in self.reports()[1]
+        assert "ci_passed=CI ✅" in self.reports()[2]
+        assert "pr_number" in self.reports()[2]
+
+
+    def test_branch_named_main_is_still_a_pr_branch_when_default_is_trunk(self):
+        self.set_default_branch()
+        self.git("branch", "-m", "main")
+        self.write("prs.json", [pr(321, branch="main")])
+        self.run_plugin("refresh")
+        assert "pr_number=#321" in self.reports()[0]
+        assert "ci_passed" in self.reports()[0]
+
+    def test_enterprise_default_branch_ci_uses_selected_host_and_repository(self):
+        self.set_default_branch()
+        self.git("remote", "set-url", "company", "git@github.example:alice/project.git")
+        self.write("repository.json", {"nameWithOwner": "alice/project", "url": "https://github.example/alice/project", "defaultBranchRef": {"name": "trunk"}})
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        self.run_plugin("refresh")
+        queries = [args for kind, args in self.calls() if kind == "gh" and args[:2] == ["api", "graphql"]]
+        assert "github.example" in queries[0]
+        assert "owner=alice" in queries[0]
+        assert "name=project" in queries[0]
+        assert "ci_passed=CI ✅" in self.reports()[0]
+
+    def test_missing_default_branch_is_an_error_without_pr_lookup(self):
+        self.set_default_branch()
+        self.write("repository.json", {"nameWithOwner": "alice/project", "url": "https://github.com/alice/project"})
+        result = self.run_plugin("refresh", check=False)
+        assert result.returncode != 0
+        assert "no default branch" in result.stderr
+        assert not (self.root / "reports").exists()
+        assert [args for kind, args in self.calls() if kind == "gh" and "state=all" in args] == []
+
+    def test_malformed_ci_clears_pr_without_renewal_then_recovers(self):
+        self.set_default_branch()
+        self.write("history.json", {"data": None, "errors": [{"message": "unavailable"}]})
+        assert self.run_plugin("refresh", check=False).returncode != 0
+        assert "--ttl-ms" not in self.reports()[0]
+        assert "ci_passed" not in self.reports()[0]
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        self.run_plugin("refresh")
+        assert "ci_passed=CI ✅" in self.reports()[1]
+
+
+    @pytest.mark.parametrize("state,active,icon", [("SUCCESS", "ci_passed", "✅"), ("FAILURE", "ci_failed", "❌"), ("PENDING", "ci_pending", "🟡")])
+    def test_ci_reports_exactly_one_colored_token_and_clears_inactive_tokens(self, state, active, icon):
+        self.set_default_branch()
+        self.set_history([[{"__typename": "StatusContext", "state": state}]])
+        self.run_plugin("refresh")
+        report = self.reports()[0]
+        assert f"{active}=CI {icon}" in report
+        assert [token for token in ("ci_passed", "ci_failed", "ci_pending") if token in report] == [token for token in ("ci_passed", "ci_failed", "ci_pending") if token != active]

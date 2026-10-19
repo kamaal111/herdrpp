@@ -43,7 +43,7 @@ def test_help_lists_both_features_without_a_session(cli, args):
     assert "Open command palette" in result.stdout
     assert "Run workspace tasks" in result.stdout
     assert "Search workspaces, worktrees and tabs" in result.stdout
-    assert "Refresh workspace PR metadata once" in result.stdout
+    assert "Refresh workspace PR and CI metadata once" in result.stdout
     assert not log.exists()
     assert not state.exists()
 

@@ -7,6 +7,11 @@ import subprocess
 import pytest
 
 TOKENS = ("$pr_open", "$pr_draft", "$pr_merged", "$pr_closed")
+CI_STYLES = [
+    {"token": "$ci_passed", "fg": "#238636"},
+    {"token": "$ci_failed", "fg": "#f85149"},
+    {"token": "$ci_pending", "fg": "#d29922"},
+]
 
 
 class TestConfigure:
@@ -41,7 +46,7 @@ class TestConfigure:
         assert all((token in self.config.read_text() for token in TOKENS))
         assert '"branch", "git_status"' in self.config.read_text()
         assert len(self.markers()) == 1
-        assert json.loads(self.markers()[0].read_text())["version"] == 3
+        assert json.loads(self.markers()[0].read_text())["version"] == 4
 
     def test_rerun_preserves_user_edits_bytes_and_modification_time(self):
         assert self.run_configure().returncode == 0
@@ -77,7 +82,7 @@ rows = [["workspace", "$pr_number", "branch"], ["$mine"]] # my rows
         assert "# my rows" in actual
         assert '"$mine"' in actual
         assert "$pr_number" not in actual
-        assert self.config.stat().st_mode & 511 == 416
+        assert self.config.stat().st_mode & 511 == 0o640
         assert next(self.state.rglob("before-1.toml")).read_text() == original
 
     def test_existing_styles_are_preserved_and_missing_tokens_added(self):
@@ -106,7 +111,7 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert '["branch"]' in self.config.read_text()
 
     def test_already_configured_records_completion_without_rewriting(self):
-        original = '[ui.sidebar.spaces]\nrows = [["$pr_open", "$pr_draft", "$pr_merged", "$pr_closed"]]\n[[keys.command]]\nkey = "cmd+p"\ntype = "plugin_action"\ncommand = "herdrpp.open"\n'
+        original = '[ui.sidebar.spaces]\nrows = [["$pr_open", "$pr_draft", "$pr_merged", "$pr_closed", {token="$ci_passed", fg="#238636"}, {token="$ci_failed", fg="#f85149"}, {token="$ci_pending", fg="#d29922"}]]\n[[keys.command]]\nkey = "cmd+p"\ntype = "plugin_action"\ncommand = "herdrpp.open"\n'
         original += '[[keys.command]]\nkey = "cmd+shift+k"\ntype = "plugin_action"\ncommand = "herdrpp.commands"\n'
         original += '[[keys.command]]\nkey = "cmd+shift+r"\ntype = "plugin_action"\ncommand = "herdrpp.tasks"\n'
         self.config.write_text(original)
@@ -188,7 +193,7 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert self.run_configure().returncode == 0
         assert "# settings before migration" in self.config.read_text()
         assert "$pr_open" in self.config.read_text()
-        assert json.loads(marker.read_text())["version"] == 3
+        assert json.loads(marker.read_text())["version"] == 4
         assert (
             next(self.state.rglob("before-1.toml")).read_text()
             == "# original settings\n"
@@ -201,12 +206,12 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert self.run_configure().returncode == 0
         marker = self.markers()[0]
         state = json.loads(marker.read_text())
-        state["version"] = 4
+        state["version"] = 5
         marker.write_text(json.dumps(state))
         self.config.write_text("# customized by a newer version\n")
         assert self.run_configure().returncode == 0
         assert self.config.read_text() == "# customized by a newer version\n"
-        assert json.loads(marker.read_text())["version"] == 4
+        assert json.loads(marker.read_text())["version"] == 5
 
     def test_unreadable_config_target_is_not_marked(self):
         self.config.mkdir()
@@ -280,12 +285,14 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert backup is None
         result = self.run_configure()
         assert result.returncode == 0, result.stderr
-        assert original in self.config.read_text()
+        import tomllib
+        assert "# custom" in self.config.read_text()
+        assert tomllib.loads(self.config.read_text())["ui"]["sidebar"]["spaces"]["rows"] == [["branch"], CI_STYLES]
         assert "herdrpp.commands" in self.config.read_text()
         assert "herdrpp.open" not in self.config.read_text()
         assert "$pr_open" not in self.config.read_text()
         assert next(self.state.rglob("before-2.toml")).read_text() == original
-        assert json.loads(marker.read_text())["version"] == 3
+        assert json.loads(marker.read_text())["version"] == 4
         self.config.write_text("# intentionally removed palette\n")
         before = self.config.stat().st_mtime_ns
         assert self.run_configure().returncode == 0
@@ -346,13 +353,15 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         marker = self.seed_version_two(original)
         result = self.run_configure()
         assert result.returncode == 0, result.stderr
-        assert original in self.config.read_text()
+        import tomllib
+        assert "# custom" in self.config.read_text()
+        assert tomllib.loads(self.config.read_text())["ui"]["sidebar"]["spaces"]["rows"] == [["branch"], CI_STYLES]
         assert "herdrpp.tasks" in self.config.read_text()
         assert "herdrpp.commands" not in self.config.read_text()
         assert "herdrpp.open" not in self.config.read_text()
         assert "$pr_open" not in self.config.read_text()
         assert next(self.state.rglob("before-3.toml")).read_text() == original
-        assert json.loads(marker.read_text())["version"] == 3
+        assert json.loads(marker.read_text())["version"] == 4
 
     @pytest.mark.parametrize("key", ["cmd+shift+r", "SHIFT+CMD+R", "r+super+shift"])
     def test_conflicting_task_shortcut_is_preserved_and_reported_once(self, key):
@@ -360,7 +369,8 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         self.seed_version_two(original)
         result = self.run_configure()
         assert result.returncode == 0, result.stderr
-        assert self.config.read_text() == original
+        assert original in self.config.read_text()
+        assert "$ci_passed" in self.config.read_text()
         assert "Cmd+Shift+R is already bound" in result.stdout
         assert "herdrpp.tasks" in result.stdout
         assert "prefix+shift+r" in result.stdout
@@ -376,3 +386,58 @@ rows = [[{token="workspace", bold=false}, {token="$pr_open", fg="#abc"}]]
         assert self.run_configure().returncode == 0
         assert self.config.read_bytes() == original
         assert self.config.read_text().count("herdrpp.tasks") == 1
+
+
+    def test_version_three_adds_only_ci_beside_existing_pr_styles(self):
+        original = '# custom\n[ui.sidebar.spaces]\nrows=[["workspace", {token="$pr_open", fg="#abc"}, "branch"]]\n'
+        marker = self.seed_version_two(original)
+        state = json.loads(marker.read_text())
+        state["version"] = 3
+        marker.write_text(json.dumps(state))
+        assert self.run_configure().returncode == 0
+        import tomllib
+        rows = tomllib.loads(self.config.read_text())["ui"]["sidebar"]["spaces"]["rows"]
+        assert rows == [["workspace", {"token": "$pr_open", "fg": "#abc"}, *CI_STYLES, "branch"]]
+        assert "herdrpp.tasks" not in self.config.read_text()
+        assert "$pr_closed" not in self.config.read_text()
+        assert next(self.state.rglob("before-4.toml")).read_text() == original
+        before = self.config.read_bytes()
+        assert self.run_configure().returncode == 0
+        assert self.config.read_bytes() == before
+
+    def test_ci_migration_preserves_existing_colored_token_without_duplication(self):
+        original = '[ui.sidebar.spaces]\nrows=[[{token="$ci_passed", fg="#abc"}]]\n'
+        marker = self.seed_version_two(original)
+        state = json.loads(marker.read_text())
+        state["version"] = 3
+        marker.write_text(json.dumps(state))
+        assert self.run_configure().returncode == 0
+        assert self.config.read_text() == original
+        assert json.loads(marker.read_text())["version"] == 4
+
+    def test_version_three_upgrade_has_one_ci_migration_and_backup(self):
+        original = '# custom\n[ui.sidebar.spaces]\nrows=[["workspace", {token="$mine", fg="#abc"}]]\n'
+        marker = self.seed_version_two(original)
+        state = json.loads(marker.read_text())
+        state["version"] = 3
+        marker.write_text(json.dumps(state))
+        assert self.run_configure().returncode == 0
+        import tomllib
+        rows = tomllib.loads(self.config.read_text())["ui"]["sidebar"]["spaces"]["rows"]
+        assert rows == [["workspace", *CI_STYLES, {"token": "$mine", "fg": "#abc"}]]
+        assert next(self.state.rglob("before-4.toml")).read_text() == original
+        assert list(self.state.rglob("before-5.toml")) == []
+        assert json.loads(marker.read_text())["version"] == 4
+        self.config.write_text(original)
+        assert self.run_configure().returncode == 0
+        assert self.config.read_text() == original
+
+    def test_ci_migration_rejects_full_row_without_writes(self):
+        original = '[ui.sidebar.spaces]\nrows=[["workspace", ' + ', '.join(['"branch"'] * 15) + ']]\n'
+        marker = self.seed_version_two(original)
+        state = json.loads(marker.read_text())
+        state["version"] = 3
+        marker.write_text(json.dumps(state))
+        assert self.run_configure().returncode != 0
+        assert self.config.read_text() == original
+        assert json.loads(marker.read_text())["version"] == 3

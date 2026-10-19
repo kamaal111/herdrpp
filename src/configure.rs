@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value};
 
 // Bump only for a new, targeted config migration, never for a package release.
-const CONFIG_VERSION: u32 = 3;
+const CONFIG_VERSION: u32 = 4;
 const FNV1A_64_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV1A_64_PRIME: u64 = 0x100000001b3;
 const TOKENS: [(&str, &str); 4] = [
@@ -93,10 +93,7 @@ fn validate(rows: &Array) -> Result<()> {
     Ok(())
 }
 
-fn migrate_sidebar(original: &str) -> Result<String> {
-    let mut document = original
-        .parse::<DocumentMut>()
-        .context("parse Herdr config TOML")?;
+fn sidebar_spaces(document: &mut DocumentMut) -> Result<&mut Table> {
     let mut table = document.as_table_mut();
     for key in ["ui", "sidebar", "spaces"] {
         if !table.contains_key(key) {
@@ -111,6 +108,14 @@ fn migrate_sidebar(original: &str) -> Result<String> {
                 format!("{key} must be a TOML table; merge sidebar tokens manually")
             })?;
     }
+    Ok(table)
+}
+
+fn migrate_sidebar(original: &str) -> Result<String> {
+    let mut document = original
+        .parse::<DocumentMut>()
+        .context("parse Herdr config TOML")?;
+    let table = sidebar_spaces(&mut document)?;
     if !table.contains_key("rows") {
         let example = include_str!("../examples/herdr.toml").parse::<DocumentMut>()?;
         table.insert("rows", example["ui"]["sidebar"]["spaces"]["rows"].clone());
@@ -175,6 +180,71 @@ fn migrate_sidebar(original: &str) -> Result<String> {
             }
             rows.push(row);
         }
+    }
+    validate(rows)?;
+    Ok(document.to_string())
+}
+
+fn migrate_ci(original: &str) -> Result<String> {
+    let mut document = original
+        .parse::<DocumentMut>()
+        .context("parse Herdr config TOML")?;
+    let table = sidebar_spaces(&mut document)?;
+    if !table.contains_key("rows") {
+        table.insert("rows", Item::Value(Value::Array(Array::new())));
+    }
+    let rows = table
+        .get_mut("rows")
+        .and_then(Item::as_array_mut)
+        .context("sidebar rows must be an array")?;
+    validate(rows)?;
+    if rows
+        .iter()
+        .flat_map(|row| row.as_array().into_iter().flatten())
+        .any(|value| {
+            token(value).is_some_and(|name| {
+                crate::pr::herdr::CI_TOKENS
+                    .iter()
+                    .any(|(_, token, _)| name.strip_prefix('$') == Some(*token))
+            })
+        })
+    {
+        return Ok(original.to_owned());
+    }
+    let locate = |pr: bool| {
+        rows.iter().enumerate().find_map(|(r, row)| {
+            row.as_array()?
+                .iter()
+                .enumerate()
+                .filter(|(_, value)| {
+                    token(value).is_some_and(|name| {
+                        if pr {
+                            name == "$pr_number" || TOKENS.iter().any(|(token, _)| *token == name)
+                        } else {
+                            name == "workspace"
+                        }
+                    })
+                })
+                .map(|(c, _)| (r, c))
+                .last()
+        })
+    };
+    let tokens =
+        crate::pr::herdr::CI_TOKENS.map(|(_, name, color)| styled(&format!("${name}"), color));
+    if let Some((r, c)) = locate(true).or_else(|| locate(false)) {
+        let row = rows
+            .get_mut(r)
+            .and_then(Value::as_array_mut)
+            .context("CI sidebar row")?;
+        for (offset, value) in tokens.into_iter().enumerate() {
+            row.insert(c + 1 + offset, value);
+        }
+    } else {
+        let mut row = Array::new();
+        for value in tokens {
+            row.push(value);
+        }
+        rows.push(row);
     }
     validate(rows)?;
     Ok(document.to_string())
@@ -384,6 +454,10 @@ pub fn run() -> Result<()> {
         if conflict {
             conflicts.push("Cmd+Shift+R is already bound; existing shortcut preserved. Add herdrpp.tasks manually using another key, such as prefix+shift+r.");
         }
+    }
+    if completed < 4 {
+        backups.push((4, updated.clone()));
+        updated = migrate_ci(&updated)?;
     }
     if original.as_deref() != Some(&updated) {
         if original.is_some() {

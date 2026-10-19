@@ -70,11 +70,13 @@ Plugin settings have feature sections, starting with `[picker]`. Extend this
 schema with explicit settings when adding a feature; unknown settings are errors.
 The picker never depends on successful GitHub discovery.
 
-The PR source is `herdrpp`. `pr_number` contains only `#123`; exactly one
-lifecycle token contains the styled number and check icon. Reports clear
+The metadata source is `herdrpp`. Default branches use one of `ci_passed`,
+`ci_failed`, or `ci_pending` and clear all PR tokens; other branches clear all CI tokens. `pr_number` contains only
+`#123`; exactly one lifecycle token contains the styled number and check icon. Reports clear
 inactive tokens atomically. Checkout selection prefers explicit worktree paths,
 then the focused pane's foreground cwd or original cwd in the active tab.
-Tracking remotes take priority over origin; inherited `GH_REPO` is ignored.
+Tracking remotes take priority, followed by a sole eligible remote, then the
+GitHub CLI selection; inherited `GH_REPO` is ignored.
 Repeated checkout contexts share one lookup per cycle. Workspace and branch
 identity are rechecked before reporting.
 
@@ -95,6 +97,10 @@ Version 2 adds only the available Cmd+Shift+K palette binding. Version 3 adds
 only the available Cmd+Shift+R workspace task binding. Each completed
 migration stays complete after user edits or deletion; upgrades run only pending
 migrations and keep per-migration backups.
+
+Version 4 adds the colored CI state tokens beside the PR display or workspace,
+preserving custom styles, removed PR tokens, and shortcuts. Completed setup
+stays complete after user edits or removal of the CI display.
 
 Advance the setup version only for an ordered, targeted change in required
 configuration, never for ordinary releases or restoring user customizations.

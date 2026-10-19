@@ -36,6 +36,10 @@ CASES = (
     "pr-open-failed",
     "pr-merged-passed",
     "pr-closed-no-checks",
+    "ci-passed",
+    "ci-failed",
+    "ci-pending",
+    "cleared-ci",
 )
 PR_CASES = {
     "pr-draft-pending": ("OPEN", True, "PENDING", "8b949e", "🟡"),
@@ -345,7 +349,9 @@ enabled = false
         fake.write_text("""#!/usr/bin/env python3
 import json,sys,pathlib
 if sys.argv[1:3] == ["repo","view"]:
-    print(json.dumps({"nameWithOwner":"snapshot/TCG","url":"https://github.com/snapshot/TCG"}))
+    print(json.dumps({"nameWithOwner":"snapshot/TCG","url":"https://github.com/snapshot/TCG","defaultBranchRef":{"name":"main"}}))
+elif sys.argv[1:3] == ["api","graphql"]:
+    print(pathlib.Path(__file__).with_name("history.json").read_text())
 elif sys.argv[1:3] == ["pr","view"]:
     print(pathlib.Path(__file__).with_name("details.json").read_text())
 else:
@@ -369,6 +375,16 @@ else:
                 }
             )
         )
+        ci_state = {"ci-passed": "SUCCESS", "ci-failed": "FAILURE", "ci-pending": "PENDING", "cleared-ci": "SUCCESS"}.get(self.case)
+        self.ci_case = ci_state is not None
+        self.ci_token = {"SUCCESS": "ci_passed", "FAILURE": "ci_failed", "PENDING": "ci_pending"}.get(ci_state)
+        self.ci_icon = {"SUCCESS": "✅", "FAILURE": "❌", "PENDING": "🟡"}.get(ci_state)
+        self.history_file = fake.parent / "history.json"
+        self.history_file.write_text(json.dumps({"data": {"repository": {"ref": {"target": {"history": {"nodes": [
+            {"oid": "a" * 40, "statusCheckRollup": {"contexts": {"nodes":
+                [{"__typename": "StatusContext", "state": ci_state}] if self.ci_case else [],
+                "pageInfo": {"hasNextPage": False, "endCursor": None}}}}
+        ]}}}}}}))
         fake.chmod(0o755)
         plugin = self.directory / "plugin"
         (plugin / "target/release").mkdir(parents=True)
@@ -466,6 +482,27 @@ else:
         )
 
     def capture(self):
+        if self.ci_case:
+            self.wait_api(lambda s: any(w.get("tokens", {}).get(self.ci_token) == f"CI {self.ci_icon}" for w in s["workspaces"]))
+            grid = self.client.wait(f"CI {self.ci_icon}", "#95", "no-pr")
+            line = next(y for y, text in enumerate(self.client.screen.display) if "CI " in text)
+            column = self.client.screen.display[line].index("CI ")
+            expected_color = {"ci-passed": "238636", "ci-failed": "f85149", "ci-pending": "d29922", "cleared-ci": "238636"}[self.case]
+            assert [self.client.screen.buffer[line][x].fg for x in range(column, column + 4)] == [expected_color] * 4
+            root = next(w for w in self.api("api", "snapshot")["snapshot"]["workspaces"] if w.get("label") == "TCG")
+            assert "pr_number" not in root.get("tokens", {})
+            assert root["tokens"][self.ci_token] == f"CI {self.ci_icon}"
+            if self.case == "cleared-ci":
+                self.history_file.write_text(json.dumps({"data": {"repository": {"ref": {"target": {"history": {"nodes": []}}}}}}))
+                self.refresh()
+                self.wait_api(lambda s: all(all(token not in w.get("tokens", {}) for token in ("ci_passed", "ci_failed", "ci_pending")) for w in s["workspaces"]))
+                self.client.wait("TCG", "#95", "no-pr")
+                deadline = time.monotonic() + 10
+                while "CI " in "\n".join(self.client.screen.display) and time.monotonic() < deadline:
+                    self.client.read()
+                grid = self.client.grid()
+                assert "CI " not in "\n".join(self.client.screen.display)
+            return grid
         if self.case == "client-config-without-token":
             grid = self.client.wait("export-import", "no-pr")
             assert "#95" not in "\n".join(self.client.screen.display)
