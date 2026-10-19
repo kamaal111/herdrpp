@@ -17,6 +17,7 @@ fn checkout() -> Checkout {
         head_repo: "alice/project".into(),
         head_branch: "feature".into(),
         host: "github.com".into(),
+        remotes: vec![],
     }
 }
 

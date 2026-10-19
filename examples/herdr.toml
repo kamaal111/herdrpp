@@ -1,6 +1,6 @@
 # Apply on the computer displaying the Herdr client, including for remote use.
 # Reload config from that client's in-app menu after editing.
-# Replace $pr_number with these four styled tokens in your existing rows.
+# Replace $pr_number with the PR and CI tokens in your existing rows.
 [[keys.command]]
 key = "cmd+shift+r"
 type = "plugin_action"
@@ -15,6 +15,9 @@ rows = [
     { token = "$pr_draft", fg = "#8b949e" },
     { token = "$pr_merged", fg = "#a371f7" },
     { token = "$pr_closed", fg = "#f85149" },
+    { token = "$ci_passed", fg = "#238636" },
+    { token = "$ci_failed", fg = "#f85149" },
+    { token = "$ci_pending", fg = "#d29922" },
   ],
   ["branch", "git_status"],
 ]

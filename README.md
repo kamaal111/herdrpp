@@ -101,6 +101,9 @@ rows = [
     { token = "$pr_draft", fg = "#8b949e" },
     { token = "$pr_merged", fg = "#a371f7" },
     { token = "$pr_closed", fg = "#f85149" },
+    { token = "$ci_passed", fg = "#238636" },
+    { token = "$ci_failed", fg = "#f85149" },
+    { token = "$ci_pending", fg = "#d29922" },
   ],
   ["branch", "git_status"],
 ]
@@ -295,10 +298,23 @@ After installation, select **Reload config** in the viewing client. If your
 terminal reserves the chord, use `prefix+shift+r` instead. Later installations
 leave a deliberately removed shortcut untouched.
 
-## Pull request status
+## Pull request and CI status
 
-The expanded desktop sidebar shows the newest associated GitHub PR by creation
-date, matching the exact head repository and branch across all states. Linked
+On the repository's default branch, the sidebar shows `CI ✅`, `CI ❌`, or
+`CI 🟡` instead of a PR. The default branch is discovered from GitHub. Tracking
+remotes take priority, followed by a sole eligible remote, then GitHub CLI's
+selected repository when several exist. No branch or remote name is assumed.
+A local branch tracking the default branch also receives this CI display.
+
+CI uses the remote default branch's latest 10 commits, independent of the local
+checkout's commit. The newest commit with running or actionable completed
+checks wins. Commits with only queued checks or no actionable checks are
+skipped; if none qualifies, the newest queued status is shown. No actionable
+checks in those 10 commits means no indicator. Statuses from different commits
+are never combined.
+
+On other branches, the expanded desktop sidebar shows the newest associated
+GitHub PR by creation date, matching the exact head repository and branch across all states. Linked
 worktrees are independent. Open PR numbers are green, draft gray, merged purple,
 and closed red. Checks show ✅ passed, ❌ failed, or 🟡 pending. Merged PRs and PRs
 without actionable checks omit the check icon.
@@ -317,12 +333,17 @@ wins over pending, then passing, and neutral/skipped checks are ignored.
 GitHub Enterprise hosts authenticated through `gh` are supported. Detached
 HEAD, non-Git directories, and local-only remotes have no association. Lookup
 failures preserve previous metadata until its 180-second expiry; confirmed
-empty results clear it. Stop, disable, and unlink leave displayed tokens to
-expire. Run start after re-enabling or recovering an exited watcher.
+empty results clear it. Once a default branch is confirmed, PR metadata is
+cleared even if CI retrieval fails; existing CI then expires without renewal.
+Stop, disable, and unlink leave displayed tokens to expire. Run start after re-enabling or recovering an exited watcher.
 
 Closing or reconnecting a client does not stop the watcher. Running watchers
 notice binary or installation changes between refresh cycles. The launcher is
 not a crash supervisor. Collapsed/mobile layouts are controlled by Herdr.
+
+Setup migration 4 adds colored CI indicators on the next installer run or
+`herdrpp configure`. Reload config in the viewing client afterward. Custom PR
+displays and shortcuts are preserved.
 
 ## Troubleshooting
 

@@ -314,7 +314,9 @@ import json, pathlib, sys
 fixtures = json.loads(pathlib.Path(__file__).with_name("prs.json").read_text())
 args = sys.argv[1:]
 if args[:2] == ["repo", "view"]:
-    print(json.dumps({"nameWithOwner":"snapshot/herdrpp", "url":"https://github.com/snapshot/herdrpp"}))
+    print(json.dumps({"nameWithOwner":"snapshot/herdrpp", "url":"https://github.com/snapshot/herdrpp", "defaultBranchRef":{"name":"main"}}))
+elif args[:2] == ["api", "graphql"]:
+    print(json.dumps({"data":{"repository":{"ref":{"target":{"history":{"nodes":[]}}}}}}))
 elif args[:2] == ["pr", "view"]:
     print(json.dumps(next(case["details"] for case in fixtures if case["details"]["number"] == int(args[2]))))
 elif args[0] == "api":

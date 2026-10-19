@@ -1,5 +1,5 @@
 use crate::command::run;
-use crate::pr::github::{Lifecycle, PrSummary};
+use crate::pr::github::{CiStatus, Lifecycle, WorkspaceStatus};
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use std::{
@@ -146,7 +146,33 @@ const LIFECYCLE_TOKENS: [(Lifecycle, &str); 4] = [
     (Lifecycle::Closed, "pr_closed"),
 ];
 
-pub fn report(workspace_id: &str, pr: Option<PrSummary>) -> Result<()> {
+pub const CI_TOKENS: [(CiStatus, &str, &str); 3] = [
+    (CiStatus::Passed, "ci_passed", "#238636"),
+    (CiStatus::Failed, "ci_failed", "#f85149"),
+    (CiStatus::Pending, "ci_pending", "#d29922"),
+];
+
+pub fn report(workspace_id: &str, status: Option<WorkspaceStatus>) -> Result<()> {
+    report_metadata(workspace_id, status, false)
+}
+
+pub fn clear_pr(workspace_id: &str) -> Result<()> {
+    report_metadata(workspace_id, None, true)
+}
+
+fn report_metadata(
+    workspace_id: &str,
+    status: Option<WorkspaceStatus>,
+    preserve_ci: bool,
+) -> Result<()> {
+    let pr = match status {
+        Some(WorkspaceStatus::PullRequest(pr)) => Some(pr),
+        _ => None,
+    };
+    let ci = match status {
+        Some(WorkspaceStatus::DefaultBranch { ci }) => ci,
+        _ => None,
+    };
     let mut args = vec![
         "workspace".to_owned(),
         "report-metadata".to_owned(),
@@ -169,9 +195,19 @@ pub fn report(workspace_id: &str, pr: Option<PrSummary>) -> Result<()> {
             args.extend(["--clear-token".into(), token.into()]);
         }
     }
-    if pr.is_some() {
+    if !preserve_ci {
+        for (state, token, _) in CI_TOKENS {
+            if let Some(ci) = ci.filter(|ci| *ci == state) {
+                args.extend(["--token".into(), format!("{token}=CI {}", ci.icon())]);
+            } else {
+                args.extend(["--clear-token".into(), token.into()]);
+            }
+        }
+    }
+    if pr.is_some() || ci.is_some() {
         args.extend(["--ttl-ms".into(), "180000".into()]);
-    } else {
+    }
+    if pr.is_none() {
         args.extend(["--clear-token".into(), TOKEN.into()]);
     }
     cli(&args.iter().map(String::as_str).collect::<Vec<_>>())?;
