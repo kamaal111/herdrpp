@@ -203,6 +203,13 @@ and client-only actions such as Settings, Help, and Toggle Sidebar are outside
 this version's coverage. Discovery failures leave built-ins available with a
 warning; reopen to refresh the catalog.
 
+**View Pull Request** appears when the opening workspace has a PR number in
+its sidebar status, including draft, closed, and merged PRs. Selecting it opens
+that PR in the system's default browser on the machine running the plugin
+(`open` on macOS, `xdg-open` on Linux). Availability follows the sidebar's next
+status refresh; reopen the palette to refresh its commands. GitHub CLI access
+is needed only when selecting the command to resolve the PR URL.
+
 Type or paste to filter, use ↑/↓ or Ctrl+P/N, and press Enter or click a result
 to run it. Cmd+Backspace or Ctrl+U clears the search or name input.
 Rename commands prefill the existing name and require a nonblank name. New Tab

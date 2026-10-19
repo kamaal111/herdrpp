@@ -96,36 +96,29 @@ pub fn validate_selection<'a>(items: &'a [Item], selection: &Selection) -> Resul
     Ok(command)
 }
 
-fn load(api: &Herdr, context: &Context, mut naming: Naming, cancelled: &AtomicBool) -> Catalog {
-    naming.resolve_workspace_suggestion(cancelled);
-    let mut items = catalog::builtins(context);
+fn load(api: &Herdr, mut catalog: Catalog, cancelled: &AtomicBool) -> Catalog {
+    catalog.naming.resolve_workspace_suggestion(cancelled);
     let plugins = (|| {
         let plugins = decode(&api.call_cancellable(&["plugin", "list", "--json"], cancelled)?)?;
         let actions = decode(&api.call_cancellable(&["plugin", "action", "list"], cancelled)?)?;
-        catalog::plugin_items(plugins, actions, context, env::consts::OS)
+        catalog::plugin_items(plugins, actions, &catalog.context, env::consts::OS)
     })();
-    let warning = match plugins {
+    catalog.warning = match plugins {
         Ok(actions) => {
-            items.extend(actions);
-            catalog::sort(&mut items);
+            catalog.items.extend(actions);
             None
         }
         Err(error) => Some(format!("Plugin commands unavailable: {error:#}")),
     };
-    Catalog {
-        tasks: false,
-        context: context.clone(),
-        naming,
-        items,
-        warning,
-    }
+    catalog::sort(&mut catalog.items);
+    catalog
 }
 
 fn owner(
     api: &Herdr,
     directory: &Path,
     context: &Context,
-    naming: Naming,
+    initial_catalog: Catalog,
     cancelled: &AtomicBool,
     tasks: bool,
 ) -> Result<Option<(Catalog, Selection)>> {
@@ -135,7 +128,7 @@ fn owner(
             let _ = sender.send(if tasks {
                 crate::tasks::load(api, context)
             } else {
-                load(api, context, naming, cancelled)
+                load(api, initial_catalog, cancelled)
             });
         });
         let result = (|| {
@@ -232,6 +225,17 @@ pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
     let snapshot = api.raw_snapshot()?;
     api::validate_context(&snapshot, &context)?;
     let naming = Naming::from_snapshot(&snapshot, &context);
+    let mut items = catalog::builtins(&context);
+    if !tasks && let Some(item) = super::pull_request::item_from_snapshot(&snapshot, &context) {
+        items.push(item);
+    }
+    let initial_catalog = Catalog {
+        tasks,
+        context: context.clone(),
+        naming,
+        items,
+        warning: None,
+    };
     let directory = tempfile::tempdir()?;
     let request_env = format!("HERDRPP_PALETTE_REQUEST={}", directory.path().display());
     api.open_popup(
@@ -243,7 +247,14 @@ pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
         Some(&request_env),
     )?;
     let cancelled = AtomicBool::new(false);
-    let selected = owner(api, directory.path(), &context, naming, &cancelled, tasks)?;
+    let selected = owner(
+        api,
+        directory.path(),
+        &context,
+        initial_catalog,
+        &cancelled,
+        tasks,
+    )?;
     if let Some((catalog, selection)) = selected {
         let command = validate_selection(&catalog.items, &selection)?;
         api::execute(

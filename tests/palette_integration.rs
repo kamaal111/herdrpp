@@ -242,3 +242,49 @@ fn creation_selection_requires_prompt_input_and_rejects_control_characters() {
         .is_err()
     );
 }
+
+#[test]
+fn view_pull_request_selection_requires_no_input_or_confirmation() {
+    let command = Command::ViewPullRequest {
+        number: 123,
+        directory: "/projects/herdrpp".into(),
+    };
+    let items = vec![catalog::Item {
+        id: "herdr:view_pull_request".into(),
+        title: "View Pull Request".into(),
+        source: "Herdr".into(),
+        description: String::new(),
+        command: command.clone(),
+    }];
+    let selection = Selection {
+        id: "herdr:view_pull_request".into(),
+        input: None,
+        confirmed: false,
+    };
+    assert_eq!(
+        cli::validate_selection(&items, &selection).unwrap(),
+        &command
+    );
+    assert!(
+        cli::validate_selection(
+            &items,
+            &Selection {
+                input: Some("123".into()),
+                id: selection.id.clone(),
+                confirmed: false,
+            }
+        )
+        .is_err()
+    );
+    assert!(
+        cli::validate_selection(
+            &items,
+            &Selection {
+                confirmed: true,
+                ..selection
+            }
+        )
+        .is_err()
+    );
+    assert!(api::arguments(&command, &context()).unwrap().is_none());
+}
