@@ -381,6 +381,7 @@ fn single_workspace_fallback_selects_its_workspace_row() {
             worktree: None,
         }],
         tabs: vec![herdrpp::picker::model::Tab {
+            agent_status: Default::default(),
             tab_id: "w1:t1".into(),
             workspace_id: "w1".into(),
             label: "Terminal".into(),

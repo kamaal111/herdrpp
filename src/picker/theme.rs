@@ -1,5 +1,7 @@
 // Palette definitions adapted from Herdr at 916fcf8de029c6cac965b50f3cdb9687cd7d1537.
 // Copyright Herdr contributors. Licensed under Apache-2.0; see LICENSES/Herdr-Apache-2.0.txt.
+use super::model::AgentStatus;
+
 use anyhow::{Context, Result};
 use ratatui::style::{Color, Modifier, Style};
 use serde::Deserialize;
@@ -740,9 +742,19 @@ struct ThemeConfig {
     custom: Option<CustomColors>,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum StatusIndicatorStyle {
+    #[default]
+    Dots,
+    Symbols,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Theme {
     config: ThemeConfig,
+    status_indicators: StatusIndicatorStyle,
+    status_diagnostic: Option<String>,
     legacy_accent: Option<String>,
     appearance: Option<ThemeMode>,
 }
@@ -821,11 +833,52 @@ impl Theme {
                     .is_none()
             })
             .map(str::to_owned);
+        let indicator_setting = document
+            .get("ui")
+            .and_then(|ui| ui.get("status_indicators"));
+        let (status_indicators, status_diagnostic) = match indicator_setting {
+            None => (StatusIndicatorStyle::default(), None),
+            Some(value) => match value.clone().try_into() {
+                Ok(style) => (style, None),
+                Err(_) => (
+                    StatusIndicatorStyle::default(),
+                    Some(
+                        "invalid ui.status_indicators; expected dots or symbols; using dots"
+                            .to_owned(),
+                    ),
+                ),
+            },
+        };
         Ok(Self {
+            status_indicators,
+            status_diagnostic,
             config,
             legacy_accent,
             appearance: None,
         })
+    }
+
+    pub fn status_indicator(&self, status: AgentStatus) -> (&'static str, Color) {
+        let icon = match (self.status_indicators, status) {
+            (
+                StatusIndicatorStyle::Dots,
+                AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done,
+            ) => "●",
+            (StatusIndicatorStyle::Symbols, AgentStatus::Working) => "◐",
+            (StatusIndicatorStyle::Symbols, AgentStatus::Blocked) => "×",
+            (StatusIndicatorStyle::Symbols, AgentStatus::Done) => "✓",
+            (_, AgentStatus::Idle) => "○",
+            (_, AgentStatus::Unknown) => "·",
+        };
+        let palette = self.palette();
+        let color = match status {
+            AgentStatus::Working => palette.yellow,
+            AgentStatus::Blocked => palette.red,
+            AgentStatus::Done => palette.teal,
+            AgentStatus::Idle => palette.green,
+            AgentStatus::Unknown => palette.overlay0,
+        };
+        (icon, color)
     }
 
     pub fn auto_switch(&self) -> bool {
@@ -877,7 +930,7 @@ impl Theme {
     }
 
     fn diagnostics(&self) -> Vec<String> {
-        let mut diagnostics = Vec::new();
+        let mut diagnostics: Vec<_> = self.status_diagnostic.iter().cloned().collect();
         for (field, name) in [
             ("name", &self.config.name),
             ("dark_name", &self.config.dark_name),

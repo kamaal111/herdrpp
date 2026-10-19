@@ -165,6 +165,14 @@ tab focuses it explicitly. Up/down clears tab selection and stops at the first
 or last workspace row. `●` marks the active destination; `›` marks selection.
 Enter does nothing without results. Outside clicks are ignored.
 
+Each tab shows its agent status through its icon and name color: yellow while
+working, red when blocked or needing attention, teal for unread completion,
+green when read/idle, and muted gray when unknown. Tabs with multiple panes use
+Herdr's aggregate status. The picker follows `[ui] status_indicators = "dots"`
+or `"symbols"` from the saved Herdr configuration. Opening or highlighting the
+picker does not mark agents read. Status is fetched once per opening; reopen
+to see changes.
+
 The picker follows Herdr's saved theme, custom colors, and terminal appearance
 reports. Reopen after saving theme changes. Unsaved Settings previews are
 unavailable. Palette compatibility is based on Herdr 0.9.5.
