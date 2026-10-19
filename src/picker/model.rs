@@ -31,8 +31,22 @@ pub struct WorkspaceGroup<'a> {
     pub worktrees: Vec<&'a Workspace>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStatus {
+    Working,
+    Blocked,
+    Done,
+    Idle,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Tab {
+    #[serde(default)]
+    pub agent_status: AgentStatus,
     pub tab_id: String,
     pub workspace_id: String,
     pub label: String,

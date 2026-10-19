@@ -7,7 +7,7 @@ use serde_json::json;
 fn main() -> Result<()> {
     let case = std::env::args().nth(1).context("expected snapshot case")?;
     let (width, height) = match case.as_str() {
-        "empty-snapshot" | "loading" => (109, 20),
+        "empty-snapshot" | "loading" | "agent-status-dots" | "agent-status-symbols" => (109, 20),
         "tiny-terminal" => (6, 1),
         "tasks-search" | "tasks-diagnostics" | "palette-search" | "palette-empty"
         | "palette-rename" | "palette-create" | "palette-confirm" | "palette-loading" => (109, 20),
@@ -24,6 +24,35 @@ fn main() -> Result<()> {
         SearchMode::Hierarchical,
     );
     app.theme = Theme::parse("[theme]\nname = 'dracula'\n")?;
+    if case.starts_with("agent-status-") {
+        let mut snapshot: Snapshot = serde_json::from_value(json!({
+            "workspaces": [
+                {"workspace_id":"w1","number":1,"label":"herdrpp","active_tab_id":"w1:t1"},
+                {"workspace_id":"w2","number":2,"label":"feature/status","active_tab_id":"w2:t1","worktree":{"repo_key":"herdrpp","is_linked_worktree":true}},
+                {"workspace_id":"w3","number":3,"label":"docs","active_tab_id":"w3:t1"}
+            ],
+            "tabs": [
+                {"workspace_id":"w1","tab_id":"w1:t1","number":1,"label":"Working","agent_status":"working"},
+                {"workspace_id":"w1","tab_id":"w1:t2","number":2,"label":"Blocked","agent_status":"blocked"},
+                {"workspace_id":"w2","tab_id":"w2:t1","number":1,"label":"Done","agent_status":"done"},
+                {"workspace_id":"w2","tab_id":"w2:t2","number":2,"label":"Read","agent_status":"idle"},
+                {"workspace_id":"w3","tab_id":"w3:t1","number":1,"label":"Terminal","agent_status":"unknown"}
+            ],
+            "focused_workspace_id":"w1","focused_tab_id":"w1:t1"
+        }))?;
+        snapshot.workspaces[0].worktree =
+            serde_json::from_value(json!({"repo_key":"herdrpp","is_linked_worktree":false}))?;
+        snapshot.validate()?;
+        app = App::new(snapshot, SearchMode::Hierarchical);
+        let indicators = if case == "agent-status-symbols" {
+            "symbols"
+        } else {
+            "dots"
+        };
+        app.theme = Theme::parse(&format!(
+            "[theme]\nname = 'dracula'\n[ui]\nstatus_indicators = '{indicators}'"
+        ))?;
+    }
     let mut terminal = Terminal::new(TestBackend::new(width, height))?;
     let context = serde_json::from_value(
         json!({"workspace_id":"w2","tab_id":"w2:t7","focused_pane_id":"w2:p8","tab_label":"Codex"}),

@@ -194,7 +194,7 @@ fn row_line(
 }
 
 fn tab_width(row: &Row) -> usize {
-    row.label.width() + 2 + usize::from(row.active)
+    row.label.width() + 4 + 2 * usize::from(row.active)
 }
 
 fn tab_window(tabs: &[Row], selected: Option<usize>, width: usize) -> (usize, Vec<(usize, usize)>) {
@@ -230,26 +230,33 @@ fn tab_window(tabs: &[Row], selected: Option<usize>, width: usize) -> (usize, Ve
     (start, visible)
 }
 
-fn tab_line(row: &Row, width: usize, selected: bool, palette: Palette) -> Line<'static> {
+fn tab_line(row: &Row, width: usize, selected: bool, theme: &Theme) -> Line<'static> {
+    let palette = theme.palette();
+    let (icon, color) = theme.status_indicator(row.agent_status);
     let mut spans = Vec::new();
-    if width < 3 {
-        spans.extend(colored_label_spans(
-            &row.label,
-            &row.label_matches,
-            width,
-            RowKind::Tab,
-            palette,
-        ));
+    let label_width = if width < 3 {
+        width
     } else {
-        let active = row.active && width >= 4;
-        spans.push(Span::raw(if active { "[●" } else { "[" }));
-        spans.extend(colored_label_spans(
-            &row.label,
-            &row.label_matches,
-            width - 2 - usize::from(active),
-            RowKind::Tab,
-            palette,
-        ));
+        spans.push(Span::raw("["));
+        let status = width >= 5;
+        let active = row.active && width >= 7;
+        if active {
+            spans.push(Span::raw("● "));
+        }
+        if status {
+            spans.push(Span::styled(
+                format!("{icon} "),
+                ratatui::style::Style::default().fg(color),
+            ));
+        }
+        width - 2 - 2 * usize::from(active) - 2 * usize::from(status)
+    };
+    spans.extend(
+        label_spans(&row.label, &row.label_matches, label_width)
+            .into_iter()
+            .map(|span| span.fg(color)),
+    );
+    if width >= 3 {
         spans.push(Span::raw("]"));
     }
     let style = if selected {
@@ -317,7 +324,7 @@ fn render_result(frame: &mut Frame<'_>, app: &App, index: usize, area: Rect) -> 
                 &result.tabs[tab],
                 width,
                 selected_tab == Some(tab),
-                palette,
+                &app.theme,
             )),
             hit,
         );

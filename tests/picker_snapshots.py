@@ -31,13 +31,14 @@ BASELINES = Path("/baselines")
 FONTS = ROOT / "tests/snapshots/fonts"
 CASES = (
     "showcase-dracula", "showcase-commands", "showcase-tasks",
+    "agent-status-dots", "agent-status-symbols",
     "hierarchical-unfiltered", "flat-search", "no-matches",
     "narrow-search", "scrolled-selection", "light-search",
     "empty-snapshot", "loading", "tiny-terminal", "tab-cycling",
     "tasks-search", "tasks-diagnostics",
     "palette-popup", "palette-search", "palette-empty", "palette-rename", "palette-create", "palette-confirm", "palette-narrow", "palette-loading",
 )
-CONTROLLED = {"tasks-search", "tasks-diagnostics", "empty-snapshot", "loading", "tiny-terminal",
+CONTROLLED = {"agent-status-dots", "agent-status-symbols", "tasks-search", "tasks-diagnostics", "empty-snapshot", "loading", "tiny-terminal",
               "palette-search", "palette-empty", "palette-rename", "palette-create", "palette-confirm", "palette-narrow", "palette-loading"}
 SHOWCASE_PRS = (
     (95, "open-passing", "OPEN", False, "SUCCESS", "pr_open", "238636", "✅"),
@@ -493,13 +494,13 @@ else:
         if self.case == "scrolled-selection":
             self.client.send(b"\x0e" * 40)
             grid = self.client.wait("dotfiles", "8/8")
-            assert "[●Codex]" not in "\n".join(self.client.screen.display)
+            assert "[● · Codex]" not in "\n".join(self.client.screen.display)
             return grid
         if self.case == "tab-cycling":
             self.client.send(b"herdrpp")
             self.client.wait("> herdrpp", "4 results")
             self.client.send(b"\t\t\t\x1b[Z")
-            return self.client.wait("[Tests]", "◀", "4 results")
+            return self.client.wait("[· Tests]", "◀", "4 results")
         query = {
             "flat-search": "herdrpp feature/search codex",
             "no-matches": "zzzzzzzz",
@@ -509,7 +510,7 @@ else:
         if self.case == "no-matches":
             needles += ["0 results", "No matching results"]
         elif self.case == "flat-search":
-            needles += ["herdrpp / feature/search", "[Codex]", "1 results"]
+            needles += ["herdrpp / feature/search", "[· Codex]", "1 results"]
         elif self.case != "narrow-search":
             needles += ["feature/search", "fix/pricing", "dotfiles"]
         return self.client.wait(*needles)
@@ -816,7 +817,7 @@ class FocusTests(unittest.TestCase):
     def test_mouse_click_on_sole_tab_preserves_its_non_root_pane(self):
         target = self.prepare_target("dotfiles", "Codex")
         self.open_picker("dotfiles")
-        after = self.finish(self.click("[Codex]"), target)
+        after = self.finish(self.click("[· Codex]"), target)
         self.assertEqual(focus_state(after), target)
 
     def test_escape_after_selecting_another_tab_keeps_original_focus_and_layout(self):

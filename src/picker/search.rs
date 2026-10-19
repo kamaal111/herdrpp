@@ -2,7 +2,7 @@ use crate::search::matcher::{FieldMatcher, Query};
 
 use crate::picker::{
     config::SearchMode,
-    model::{Snapshot, Tab, Target, Workspace},
+    model::{AgentStatus, Snapshot, Tab, Target, Workspace},
     ordering,
 };
 
@@ -32,12 +32,14 @@ pub struct Row {
     pub score: u32,
     pub matches_query: bool,
     pub active: bool,
+    pub agent_status: AgentStatus,
 }
 
 impl Row {
     fn tab(snapshot: &Snapshot, tab: &Tab, ancestors: Vec<Ancestor>) -> Self {
         Self {
             kind: RowKind::Tab,
+            agent_status: tab.agent_status,
             target: Target::Tab(tab.tab_id.clone()),
             workspace_id: tab.workspace_id.clone(),
             label: tab.label.clone(),
@@ -168,6 +170,7 @@ impl Search {
         };
         let mut row = Row {
             kind,
+            agent_status: AgentStatus::Unknown,
             target: Target::Workspace(workspace.workspace_id.clone()),
             workspace_id: workspace.workspace_id.clone(),
             label: workspace.label.clone(),
