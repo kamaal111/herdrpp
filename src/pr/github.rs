@@ -469,11 +469,14 @@ fn resolve_repository(checkout: &Checkout) -> Result<(Checkout, bool, String)> {
         );
         head
     };
-    let default_branch = head_repository
+    let default_branch_name = head_repository
         .default_branch_ref
         .context("GitHub repository has no default branch")?
-        .name
-        == checkout.head_branch;
+        .name;
+    if checkout.branch == "gitbutler/workspace" {
+        resolved.head_branch = default_branch_name.clone();
+    }
+    let default_branch = default_branch_name == resolved.head_branch;
     Ok((resolved, default_branch, base.repository))
 }
 
