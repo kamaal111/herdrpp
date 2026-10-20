@@ -183,6 +183,11 @@ def palette_case(keys, expected, loading=False, recent_ids=None):
 
 
 def main():
+    case(b"picker\x01color\x05\r", expected=[["workspace", "focus", "w1"]])
+    palette_case(b"rgt\x01spl \x05\r", dict(id="herdr:split_right", input=None, confirmed=False))
+    palette_case(b"Rename Tab\r\x01A\x05Z\r", dict(id="herdr:tab_rename", input="ACodexZ", confirmed=False))
+    palette_case(b"New Tab\r\x01A\x05Z\r", dict(id="herdr:tab_create", input="A3Z", confirmed=False))
+    palette_case(b"Rename Tab\r\x1b[1;9DA\x1b[1;9CZ\r", dict(id="herdr:tab_rename", input="ACodexZ", confirmed=False))
     palette_case(b"\rReview\r", dict(id="herdr:tab_create", input="Review", confirmed=False), recent_ids=["herdr:tab_create"])
     palette_case(b"split\x15\rReview\r", dict(id="herdr:tab_create", input="Review", confirmed=False), recent_ids=["herdr:tab_create"])
     palette_case(b"spl rgt\r", dict(id="herdr:split_right", input=None, confirmed=False))

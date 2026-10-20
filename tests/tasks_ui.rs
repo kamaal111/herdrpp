@@ -210,3 +210,23 @@ fn recent_tasks_precede_unused_file_order_and_clear_restores_selection() {
         })
     );
 }
+
+#[test]
+fn task_search_command_arrows_jump_without_resetting_results() {
+    let mut app = task_app();
+    app.set_query("dev server".into());
+    let selected = app.selected;
+    app.handle(Event::Key(KeyEvent::new(
+        KeyCode::Left,
+        KeyModifiers::SUPER,
+    )));
+    assert_eq!(app.input().cursor(), 0);
+    app.handle(Event::Key(KeyEvent::new(
+        KeyCode::Right,
+        KeyModifiers::SUPER,
+    )));
+    assert_eq!(app.input().cursor(), 10);
+    assert_eq!(app.query(), "dev server");
+    assert_eq!(app.results.len(), 1);
+    assert_eq!(app.selected, selected);
+}

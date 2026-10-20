@@ -1158,6 +1158,15 @@ fn cursor_arrows_preserve_results_tab_selection_scroll_and_hit_targets() {
         let hits = app.result_hits.len();
         app.handle(key(KeyCode::Left));
         app.handle(key(KeyCode::Right));
+        app.handle(Event::Key(KeyEvent::new(
+            KeyCode::Left,
+            KeyModifiers::SUPER,
+        )));
+        assert_eq!(app.input().cursor(), 0);
+        app.handle(Event::Key(KeyEvent::new(
+            KeyCode::Right,
+            KeyModifiers::SUPER,
+        )));
         assert_eq!(app.query(), "colorpicker");
         assert_eq!(app.input().cursor(), 11);
         assert_eq!(app.selected, selected);

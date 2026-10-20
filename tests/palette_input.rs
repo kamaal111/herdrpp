@@ -155,13 +155,55 @@ fn cancelling_name_prompt_restores_search_cursor_and_selection() {
 #[test]
 fn search_arrows_do_not_reset_manual_selection_scroll_or_hits() {
     let mut app = app();
-    app.navigate(3);
+    app.set_query("Tab".into());
+    app.navigate(1);
     let selected = app.selected;
     app.offset = 2;
     app.hits.push((ratatui::layout::Rect::new(0, 2, 10, 1), 3));
     app.handle(key(KeyCode::Left));
     app.handle(key(KeyCode::Right));
+    app.handle(Event::Key(KeyEvent::new(
+        KeyCode::Left,
+        KeyModifiers::SUPER,
+    )));
+    assert_eq!(app.input().cursor(), 0);
+    app.handle(Event::Key(KeyEvent::new(
+        KeyCode::Right,
+        KeyModifiers::SUPER,
+    )));
+    assert_eq!(app.input().cursor(), 3);
+    assert_eq!(app.query(), "Tab");
     assert_eq!(app.selected, selected);
     assert_eq!(app.offset, 2);
     assert_eq!(app.hits.len(), 1);
+}
+
+#[test]
+fn command_arrows_insert_at_both_edges_of_rename_and_creation_prompts() {
+    for (query, id, expected) in [
+        ("Rename Tab", "herdr:tab_rename", "ACodexZ"),
+        ("New Tab", "herdr:tab_create", "A3Z"),
+    ] {
+        let mut app = app();
+        app.set_query(query.into());
+        app.handle(key(KeyCode::Enter));
+        app.handle(Event::Key(KeyEvent::new(
+            KeyCode::Left,
+            KeyModifiers::SUPER,
+        )));
+        app.handle(key(KeyCode::Char('A')));
+        app.handle(Event::Key(KeyEvent::new(
+            KeyCode::Right,
+            KeyModifiers::SUPER,
+        )));
+        app.handle(key(KeyCode::Char('Z')));
+        assert_eq!(
+            app.handle(key(KeyCode::Enter)),
+            Action::Execute(Selection {
+                id: id.into(),
+                input: Some(expected.into()),
+                confirmed: false,
+            })
+        );
+    }
 }
