@@ -373,6 +373,7 @@ fn reopening_has_no_previous_query() {
 #[test]
 fn single_workspace_fallback_selects_its_workspace_row() {
     let snapshot = herdrpp::picker::model::Snapshot {
+        agents: vec![],
         workspaces: vec![herdrpp::picker::model::Workspace {
             workspace_id: "w1".into(),
             label: "Only".into(),
@@ -400,6 +401,7 @@ fn single_workspace_fallback_selects_its_workspace_row() {
 #[test]
 fn empty_session_has_no_selection_and_can_close() {
     let snapshot = herdrpp::picker::model::Snapshot {
+        agents: vec![],
         workspaces: vec![],
         tabs: vec![],
         focused_workspace_id: None,

@@ -54,9 +54,19 @@ pub struct Tab {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct Agent {
+    pub workspace_id: String,
+    pub tab_id: String,
+    #[serde(default)]
+    pub agent_status: AgentStatus,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct Snapshot {
     pub workspaces: Vec<Workspace>,
     pub tabs: Vec<Tab>,
+    #[serde(default)]
+    pub agents: Vec<Agent>,
     pub focused_workspace_id: Option<String>,
     pub focused_tab_id: Option<String>,
 }

@@ -167,10 +167,15 @@ tab focuses it explicitly. Up/down clears tab selection and stops at the first
 or last workspace row. `●` marks the active destination; `›` marks selection.
 Enter does nothing without results. Outside clicks are ignored.
 
-Each tab shows its agent status through its icon and name color: yellow while
+Each tab shows up to four agent status icons: yellow while
 working, red when blocked or needing attention, teal for unread completion,
-green when read/idle, and muted gray when unknown. Tabs with multiple panes use
-Herdr's aggregate status. The picker follows `[ui] status_indicators = "dots"`
+green when read/idle, and muted gray when unknown. The tab name uses Herdr's
+aggregate status color. Icons appear in snapshot order, including repeated
+statuses. Further agents are summarized as `+N`. When space is tight, the picker
+shortens the name and drops the active marker before showing fewer icons and
+increasing `+N` to count every hidden agent. Tabs without individual agent records
+keep their aggregate indicator.
+The picker follows `[ui] status_indicators = "dots"`
 or `"symbols"` from the saved Herdr configuration. Opening or highlighting the
 picker does not mark agents read. Status is fetched once per opening; reopen
 to see changes.
