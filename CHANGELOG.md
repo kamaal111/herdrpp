@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/kamaal111/herdrpp/compare/v0.9.0...v0.10.0) (2026-10-20)
+
+
+### Features
+
+* **palette:** add Open Repo command ([68564ad](https://github.com/kamaal111/herdrpp/commit/68564ad0f3841e744bdc24f4908b2c34817f2a75))
+
+
+### Bug Fixes
+
+* **input:** move to text edges with Command arrows ([506bbc8](https://github.com/kamaal111/herdrpp/commit/506bbc870c76ad6db336d952789e0ff78a18aa8e))
+* **picker:** show multiple agent statuses per tab ([86a3ac7](https://github.com/kamaal111/herdrpp/commit/86a3ac758cdfe4d180cb7f4d8a5aaf04e1a629bc))
+
 ## [0.9.0](https://github.com/kamaal111/herdrpp/compare/v0.8.0...v0.9.0) (2026-10-20)
 
 
