@@ -289,6 +289,7 @@ pub fn run_mode(directory: &Path, mut theme: Theme, tasks: bool) -> Result<Optio
         catalog.warning,
     );
     app.tasks = catalog.tasks;
+    app.set_recent_ids(catalog.recent_ids);
     for event in pending {
         match app.handle(event) {
             Action::Cancel => return Ok(None),

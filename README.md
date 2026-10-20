@@ -203,7 +203,10 @@ The command palette uses the workspace picker's shared search algorithm and
 search view: case-insensitive fuzzy matching, all whitespace-separated terms
 required, immediate filtering, score ranking, and highlighted matching letters.
 Search command titles, descriptions, plugin names, or qualified action IDs.
-Empty searches show commands alphabetically; there is no command history.
+Empty searches (including whitespace-only input) show recently launched commands
+first, followed by unused commands alphabetically. Command history is shared
+across workspaces and persists across Herdr restarts. Only successful launches
+update history; typed searches keep their match-score ordering.
 
 Built-ins include workspace search; creating, renaming, and closing workspaces
 or tabs; renaming and closing panes; splitting right/down; focusing neighboring
@@ -251,7 +254,10 @@ restarting; completed tasks keep their output.
 
 Press **Cmd+Shift+R**, or invoke `herdr plugin action invoke herdrpp.tasks`,
 to search task labels using the command palette's keyboard, mouse, and theme
-behavior. Escape cancels. Tasks appear in file order until you search.
+behavior. Escape cancels. Empty searches show recently launched tasks first,
+followed by unused tasks in file order. Task history persists per checkout,
+using each task's label so reordering the task file preserves history. Renaming
+a label starts fresh history.
 
 This repository includes [.herdr/tasks.json](.herdr/tasks.json) with build,
 validation, and test recipes. Select `just: format-check` for a quick run in

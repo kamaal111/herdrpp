@@ -122,6 +122,15 @@ pub struct Hit {
 }
 
 pub fn search(items: &[Item], text: &str, matcher: &mut FieldMatcher) -> Vec<Hit> {
+    search_with_recent(items, text, matcher, &[])
+}
+
+pub fn search_with_recent(
+    items: &[Item],
+    text: &str,
+    matcher: &mut FieldMatcher,
+    recent_ids: &[String],
+) -> Vec<Hit> {
     let query = Query::new(text);
     let mut hits: Vec<_> = items
         .iter()
@@ -132,7 +141,20 @@ pub fn search(items: &[Item], text: &str, matcher: &mut FieldMatcher) -> Vec<Hit
                 .map(|matched| Hit { item, matched })
         })
         .collect();
-    if !query.is_empty() {
+    if query.is_empty() {
+        let ranks: std::collections::HashMap<_, _> = recent_ids
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(rank, id)| (id.as_str(), rank))
+            .collect();
+        hits.sort_by_key(|hit| {
+            ranks
+                .get(items[hit.item].id.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
+    } else {
         hits.sort_by_key(|hit| std::cmp::Reverse(hit.matched.score));
     }
     hits

@@ -55,6 +55,7 @@ pub struct App {
     pub hits: Vec<(Rect, usize)>,
     pub ok_area: Rect,
     pub cancel_area: Rect,
+    recent_ids: Vec<String>,
     matcher: FieldMatcher,
 }
 
@@ -84,10 +85,15 @@ impl App {
             hits: vec![],
             ok_area: Rect::default(),
             cancel_area: Rect::default(),
+            recent_ids: vec![],
             matcher: FieldMatcher::default(),
         };
         app.set_query(String::new());
         app
+    }
+    pub fn set_recent_ids(&mut self, recent_ids: Vec<String>) {
+        self.recent_ids = recent_ids;
+        self.refresh_results();
     }
     pub fn set_query(&mut self, text: String) {
         self.input = TextInput::new(text, false);
@@ -100,7 +106,12 @@ impl App {
         &self.input
     }
     fn refresh_results(&mut self) {
-        self.results = catalog::search(&self.items, self.input.text(), &mut self.matcher);
+        self.results = catalog::search_with_recent(
+            &self.items,
+            self.input.text(),
+            &mut self.matcher,
+            &self.recent_ids,
+        );
         self.selected = (!self.results.is_empty()).then_some(0);
         self.offset = 0;
         self.hits.clear();

@@ -2,6 +2,7 @@ use super::{
     api,
     app::Selection,
     catalog::{self, Command, Context, Item},
+    history::{self, History, UsageKey},
     naming::Naming,
     ui,
 };
@@ -30,6 +31,8 @@ const LIMIT: u64 = 4 * 1024 * 1024;
 pub struct Catalog {
     #[serde(default)]
     pub tasks: bool,
+    #[serde(default)]
+    pub recent_ids: Vec<String>,
     pub context: Context,
     pub naming: Naming,
     pub items: Vec<Item>,
@@ -139,8 +142,15 @@ fn owner(
             let mut selected_at = None;
             loop {
                 if catalog.is_none()
-                    && let Ok(loaded) = receiver.try_recv()
+                    && let Ok(mut loaded) = receiver.try_recv()
                 {
+                    match history::state_directory().and_then(|directory| History::load(&directory))
+                    {
+                        Ok(history) => loaded.recent_ids = history.recent_ids(&loaded.items),
+                        Err(error) => {
+                            eprintln!("herdr++: palette usage history unavailable: {error:#}")
+                        }
+                    }
                     write_json(&directory.join("catalog.json"), &loaded)?;
                     catalog = Some(loaded);
                 }
@@ -231,6 +241,7 @@ pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
     }
     let initial_catalog = Catalog {
         tasks,
+        recent_ids: vec![],
         context: context.clone(),
         naming,
         items,
@@ -257,6 +268,12 @@ pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
     )?;
     if let Some((catalog, selection)) = selected {
         let command = validate_selection(&catalog.items, &selection)?;
+        let key = catalog
+            .items
+            .iter()
+            .find(|item| item.id == selection.id)
+            .map(UsageKey::for_item)
+            .context("unknown palette command")?;
         api::execute(
             api,
             &socket,
@@ -265,6 +282,11 @@ pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
             &catalog.naming,
             selection.input.as_deref(),
         )?;
+        if let Err(error) =
+            history::state_directory().and_then(|directory| History::record(&directory, key))
+        {
+            eprintln!("herdr++: cannot save palette usage history: {error:#}");
+        }
     }
     Ok(())
 }

@@ -176,3 +176,37 @@ fn task_search_clear_shortcuts_clear_every_cursor_position() {
         }
     }
 }
+
+#[test]
+fn recent_tasks_precede_unused_file_order_and_clear_restores_selection() {
+    let mut app = task_app();
+    let mut build = app.items[0].clone();
+    build.id = "task:1".into();
+    build.title = "build".into();
+    let mut test = app.items[0].clone();
+    test.id = "task:2".into();
+    test.title = "test".into();
+    app.items = vec![build, app.items[0].clone(), test];
+    app.set_recent_ids(vec!["task:2".into(), "task:0".into()]);
+    assert_eq!(
+        app.results
+            .iter()
+            .map(|hit| app.items[hit.item].title.as_str())
+            .collect::<Vec<_>>(),
+        vec!["test", "dev server", "build"]
+    );
+    app.set_query("build".into());
+    app.handle(Event::Key(KeyEvent::new(
+        KeyCode::Backspace,
+        KeyModifiers::SUPER,
+    )));
+    assert_eq!(app.selected, Some(0));
+    assert_eq!(
+        app.handle(key(KeyCode::Enter)),
+        Action::Execute(herdrpp::palette::app::Selection {
+            id: "task:2".into(),
+            input: None,
+            confirmed: false
+        })
+    );
+}

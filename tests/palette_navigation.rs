@@ -439,3 +439,46 @@ fn mouse_opens_creation_prompt_and_ok_submits_its_name() {
         })
     );
 }
+
+#[test]
+fn recent_command_is_selected_after_open_clear_and_backspace_and_executes() {
+    let mut app = app();
+    app.set_recent_ids(vec!["herdr:zoom".into(), "herdr:search_workspaces".into()]);
+    assert_eq!(app.items[app.results[0].item].id, "herdr:zoom");
+    assert_eq!(app.selected, Some(0));
+    app.set_query("split".into());
+    draw(&mut app, 80, 20);
+    app.handle(Event::Key(KeyEvent::new(
+        KeyCode::Char('u'),
+        KeyModifiers::CONTROL,
+    )));
+    assert!(app.hits.is_empty());
+    assert_eq!(app.items[app.results[0].item].id, "herdr:zoom");
+    app.set_query("s".into());
+    app.handle(key(KeyCode::Backspace));
+    assert_eq!(app.query(), "");
+    assert_eq!(app.items[app.results[0].item].id, "herdr:zoom");
+    assert_eq!(
+        app.handle(key(KeyCode::Enter)),
+        Action::Execute(herdrpp::palette::app::Selection {
+            id: "herdr:zoom".into(),
+            input: None,
+            confirmed: false
+        })
+    );
+    draw(&mut app, 80, 20);
+    let area = app.hits[1].0;
+    assert_eq!(
+        app.handle(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: area.x,
+            row: area.y,
+            modifiers: KeyModifiers::NONE
+        })),
+        Action::Execute(herdrpp::palette::app::Selection {
+            id: "herdr:search_workspaces".into(),
+            input: None,
+            confirmed: false
+        })
+    );
+}

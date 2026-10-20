@@ -541,13 +541,12 @@ else:
         assert layout_state(restarted) == layout_state(started)
         self.api("plugin", "action", "invoke", "herdrpp.tasks")
         self.client.wait("Search tasks", "6 results")
-        self.client.send(b"\x0e")
         grid = self.client.wait(
             "› dev-server", "format-check", "lint", "test:watch", "build",
             "Task Palette · Task ./dev-server", "Enter Run",
             "Development server ready (run 2)", "Watching source files for changes")
         text = "\n".join(self.client.screen.display)
-        labels = ("build", "› dev-server", "format-check", "lint", "test", "test:watch")
+        labels = ("› dev-server", "format-check", "build", "lint", "test", "test:watch")
         positions = [text.index(label) for label in labels]
         assert positions == sorted(positions), text
         assert str(self.directory) not in text, text

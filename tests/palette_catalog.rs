@@ -167,3 +167,36 @@ fn view_pull_request_is_hidden_without_a_directory() {
     snapshot["workspaces"][1]["worktree"] = json!(null);
     assert!(herdrpp::palette::pull_request::item_from_snapshot(&snapshot, &context()).is_none());
 }
+
+#[test]
+fn empty_queries_use_recent_items_then_original_order_and_search_is_unchanged() {
+    let items = catalog::builtins(&context());
+    let recent = vec![
+        "herdr:zoom".into(),
+        "herdr:search_workspaces".into(),
+        "missing".into(),
+    ];
+    for query in ["", " \t"] {
+        let hits =
+            catalog::search_with_recent(&items, query, &mut FieldMatcher::default(), &recent);
+        assert_eq!(items[hits[0].item].id, "herdr:zoom");
+        assert_eq!(items[hits[1].item].id, "herdr:search_workspaces");
+        assert_eq!(items[hits[2].item].title, "Close Pane");
+        assert_eq!(hits.len(), items.len());
+    }
+    for query in ["split", "pane", "nonexistent"] {
+        let original = catalog::search(&items, query, &mut FieldMatcher::default());
+        let recent_hits =
+            catalog::search_with_recent(&items, query, &mut FieldMatcher::default(), &recent);
+        assert_eq!(
+            original
+                .iter()
+                .map(|hit| (hit.item, &hit.matched))
+                .collect::<Vec<_>>(),
+            recent_hits
+                .iter()
+                .map(|hit| (hit.item, &hit.matched))
+                .collect::<Vec<_>>()
+        );
+    }
+}
