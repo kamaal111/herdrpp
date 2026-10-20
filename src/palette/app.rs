@@ -2,6 +2,7 @@ use super::{
     catalog::{self, Command, Context, Hit, Item},
     naming::Naming,
 };
+use crate::search::input::{InputChange, TextInput};
 use crate::{picker::theme::Theme, search::matcher::FieldMatcher};
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
@@ -28,9 +29,8 @@ pub enum Mode {
     Search,
     Name {
         item: usize,
-        input: String,
+        input: TextInput,
         error: bool,
-        selected: bool,
     },
     Confirm {
         item: usize,
@@ -44,7 +44,7 @@ pub struct App {
     pub context: Context,
     pub naming: Naming,
     pub items: Vec<Item>,
-    pub query: String,
+    input: TextInput,
     pub results: Vec<Hit>,
     pub selected: Option<usize>,
     pub offset: usize,
@@ -73,7 +73,7 @@ impl App {
             context,
             naming,
             items,
-            query: String::new(),
+            input: TextInput::default(),
             results: vec![],
             selected: None,
             offset: 0,
@@ -90,8 +90,17 @@ impl App {
         app
     }
     pub fn set_query(&mut self, text: String) {
-        self.query = text;
-        self.results = catalog::search(&self.items, &self.query, &mut self.matcher);
+        self.input = TextInput::new(text, false);
+        self.refresh_results();
+    }
+    pub fn query(&self) -> &str {
+        self.input.text()
+    }
+    pub fn input(&self) -> &TextInput {
+        &self.input
+    }
+    fn refresh_results(&mut self) {
+        self.results = catalog::search(&self.items, self.input.text(), &mut self.matcher);
         self.selected = (!self.results.is_empty()).then_some(0);
         self.offset = 0;
         self.hits.clear();
@@ -132,14 +141,14 @@ impl App {
                 item, input, error, ..
             } => {
                 if matches!(self.items[*item].command, Command::Rename(_))
-                    && input.trim().is_empty()
+                    && input.text().trim().is_empty()
                 {
                     *error = true;
                     return Action::Continue;
                 }
                 Action::Execute(Selection {
                     id: self.items[*item].id.clone(),
-                    input: Some(input.clone()),
+                    input: Some(input.text().to_owned()),
                     confirmed: false,
                 })
             }
@@ -161,14 +170,16 @@ impl App {
                         let creating = matches!(self.items[item].command, Command::Create(_));
                         self.mode = Mode::Name {
                             item,
-                            input: if creating {
-                                self.naming.suggestion(scope)
-                            } else {
-                                self.naming.rename_name(scope)
-                            }
-                            .to_owned(),
+                            input: TextInput::new(
+                                if creating {
+                                    self.naming.suggestion(scope)
+                                } else {
+                                    self.naming.rename_name(scope)
+                                }
+                                .to_owned(),
+                                creating,
+                            ),
                             error: false,
-                            selected: creating,
                         };
                         self.clear_hits();
                         Action::Continue
@@ -187,49 +198,17 @@ impl App {
             }
         }
     }
-    fn clear_input(&mut self) {
-        match &mut self.mode {
-            Mode::Search => self.set_query(String::new()),
-            Mode::Name {
-                input,
-                error,
-                selected,
-                ..
-            } => {
-                input.clear();
-                *selected = false;
-                *error = false;
-            }
-            Mode::Confirm { .. } => {}
-        }
-    }
-    fn edit(&mut self, text: Option<&str>) {
+    fn edit_input(&mut self, event: &Event) {
         match &mut self.mode {
             Mode::Search => {
-                let mut query = self.query.clone();
-                if let Some(text) = text {
-                    query.push_str(text);
-                } else {
-                    query.pop();
+                if self.input.handle(event) == InputChange::Edited {
+                    self.refresh_results();
                 }
-                self.set_query(query);
             }
-            Mode::Name {
-                input,
-                error,
-                selected,
-                ..
-            } => {
-                if *selected {
-                    input.clear();
-                    *selected = false;
-                } else if text.is_none() {
-                    input.pop();
+            Mode::Name { input, error, .. } => {
+                if input.handle(event) == InputChange::Edited {
+                    *error = false;
                 }
-                if let Some(text) = text {
-                    input.push_str(text);
-                }
-                *error = false;
             }
             Mode::Confirm { .. } => {}
         }
@@ -293,24 +272,10 @@ impl App {
                     {
                         self.navigate(1)
                     }
-                    _ if crate::search::input::is_clear_shortcut(&key) => self.clear_input(),
-                    KeyCode::Backspace => self.edit(None),
-                    KeyCode::Char(ch)
-                        if !key.modifiers.intersects(
-                            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
-                        ) =>
-                    {
-                        self.edit(Some(&ch.to_string()))
-                    }
-                    _ => {}
+                    _ => self.edit_input(&Event::Key(key)),
                 }
             }
-            Event::Paste(text) => self.edit(Some(
-                &text
-                    .chars()
-                    .filter(|ch| !ch.is_control())
-                    .collect::<String>(),
-            )),
+            event @ Event::Paste(_) => self.edit_input(&event),
             Event::Mouse(mouse) => {
                 let point = (mouse.column, mouse.row).into();
                 match mouse.kind {

@@ -795,7 +795,7 @@ class FocusTests(unittest.TestCase):
 
     def assert_picker_clear_preserves_focus(self, keys):
         self.open_picker("feature/search tests")
-        self.session.client.send(keys)
+        self.session.client.send(b"\x1b[D\x1b[D" + keys)
         self.session.client.wait("Search workspaces, worktrees and tabs",
                                  absent=("> feature/search tests",))
         self.assertEqual(focus_state(self.snapshot()), self.origin)
@@ -955,7 +955,7 @@ class FocusTests(unittest.TestCase):
 
     def assert_commands_clear_preserves_focus(self, keys):
         self.open_commands("Split Pane Right")
-        self.session.client.send(keys)
+        self.session.client.send(b"\x1b[D\x1b[D" + keys)
         self.session.client.wait("Search commands", absent=("> Split Pane Right",))
         self.assertEqual(focus_state(self.snapshot()), self.origin)
         after = self.finish(b"\x1b", self.origin)
@@ -977,7 +977,7 @@ class FocusTests(unittest.TestCase):
         self.session.client.wait("> discard this name")
         self.session.client.send(b"\x15")
         self.session.client.wait("Enter a name", absent=("> discard this name",))
-        self.session.client.send("--世界 Review\r".encode())
+        self.session.client.send("--世界 Revixw\x1b[D\x7fe\r".encode())
         self.wait_command()
         after = self.finish(b"", self.origin)
         self.wait_command()
@@ -990,7 +990,7 @@ class FocusTests(unittest.TestCase):
         self.session.client.send(b"\r")
         self.session.client.wait("New Tab", "Enter Create")
         self.assertEqual(layout_state(self.snapshot()), layout_state(self.before))
-        self.session.client.send("--世界 Review\r".encode())
+        self.session.client.send("--世界 Revixw\x1b[D\x7fe\r".encode())
         self.wait_command()
         self.session.client.wait("$", absent=("Esc Cancel",))
         after = self.snapshot()

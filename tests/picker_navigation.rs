@@ -54,15 +54,15 @@ fn equal_scores_prefer_workspace_even_after_equally_ranked_tabs() {
     );
 }
 #[test]
-fn left_from_first_tab_wraps_to_last_tab() {
+fn backtab_from_first_tab_wraps_to_last_tab() {
     let mut app = app();
     app.set_query("colorpicker".into());
-    app.handle(key(KeyCode::Left));
+    app.handle(key(KeyCode::BackTab));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w1:t4".into()))
     );
-    app.handle(key(KeyCode::Left));
+    app.handle(key(KeyCode::BackTab));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w1:t9".into()))
@@ -98,13 +98,13 @@ fn escape_closes_immediately_without_clearing_query() {
     let mut app = app();
     app.set_query("color".into());
     assert_eq!(app.handle(key(KeyCode::Esc)), Action::Close);
-    assert_eq!(app.query, "color");
+    assert_eq!(app.query(), "color");
 }
 #[test]
 fn typing_filters_immediately_without_switching() {
     let mut app = app();
     assert_eq!(app.handle(key(KeyCode::Char('c'))), Action::Continue);
-    assert_eq!(app.query, "c");
+    assert_eq!(app.query(), "c");
     assert_eq!(app.selected, Some(1));
 }
 #[test]
@@ -113,7 +113,7 @@ fn backspace_updates_query_and_selection() {
     app.set_query("color".into());
     app.navigate(1);
     app.handle(key(KeyCode::Backspace));
-    assert_eq!(app.query, "colo");
+    assert_eq!(app.query(), "colo");
     assert_eq!(app.selected, Some(0));
 }
 
@@ -125,7 +125,7 @@ fn command_backspace_clears_query_and_restores_unfiltered_selection() {
             mode,
         );
         app.set_query("colorpicker".into());
-        app.handle(key(KeyCode::Right));
+        app.handle(key(KeyCode::Tab));
         assert!(app.selected_tab.is_some());
         app.offset = 1;
         app.result_hits.push(herdrpp::picker::app::ResultHit {
@@ -141,7 +141,7 @@ fn command_backspace_clears_query_and_restores_unfiltered_selection() {
             ))),
             Action::Continue
         );
-        assert_eq!(app.query, "");
+        assert_eq!(app.query(), "");
         assert_eq!(
             app.results
                 .iter()
@@ -171,11 +171,11 @@ fn command_backspace_restores_results_from_no_matches_and_handles_empty_query() 
     assert!(app.results.is_empty());
     let clear = Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::SUPER));
     assert_eq!(app.handle(clear.clone()), Action::Continue);
-    assert_eq!(app.query, "");
+    assert_eq!(app.query(), "");
     assert_eq!(app.results.len(), 3);
     assert_eq!(app.selected, Some(0));
     assert_eq!(app.handle(clear), Action::Continue);
-    assert_eq!(app.query, "");
+    assert_eq!(app.query(), "");
     assert_eq!(app.results.len(), 3);
     assert_eq!(app.selected, Some(0));
 }
@@ -187,14 +187,14 @@ fn command_backspace_release_does_not_edit_query() {
     let mut event = KeyEvent::new(KeyCode::Backspace, KeyModifiers::SUPER);
     event.kind = terminal_input::event::KeyEventKind::Release;
     assert_eq!(app.handle(Event::Key(event)), Action::Continue);
-    assert_eq!(app.query, "colorpicker");
+    assert_eq!(app.query(), "colorpicker");
 }
 
 #[test]
 fn ghostty_command_backspace_control_u_clears_query_and_restores_selection() {
     let mut app = app();
     app.set_query("colorpicker".into());
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     assert_eq!(
         app.handle(Event::Key(KeyEvent::new(
             KeyCode::Char('u'),
@@ -202,7 +202,7 @@ fn ghostty_command_backspace_control_u_clears_query_and_restores_selection() {
         ))),
         Action::Continue
     );
-    assert_eq!(app.query, "");
+    assert_eq!(app.query(), "");
     assert_eq!(app.results.len(), 3);
     assert_eq!(app.selected, Some(0));
     assert_eq!(app.selected_tab, None);
@@ -217,11 +217,11 @@ fn plain_u_types_and_control_u_release_does_not_clear() {
     let mut app = app();
     app.set_query("color".into());
     assert_eq!(app.handle(key(KeyCode::Char('u'))), Action::Continue);
-    assert_eq!(app.query, "coloru");
+    assert_eq!(app.query(), "coloru");
     let mut release = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
     release.kind = terminal_input::event::KeyEventKind::Release;
     assert_eq!(app.handle(Event::Key(release)), Action::Continue);
-    assert_eq!(app.query, "coloru");
+    assert_eq!(app.query(), "coloru");
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn backspace_removes_one_unicode_character() {
     let mut app = app();
     app.set_query("color日本".into());
     assert_eq!(app.handle(key(KeyCode::Backspace)), Action::Continue);
-    assert_eq!(app.query, "color日");
+    assert_eq!(app.query(), "color日");
 }
 
 #[test]
@@ -251,14 +251,14 @@ fn horizontal_navigation_wraps_in_ui_order_without_selecting_the_workspace() {
         );
         app.set_query("colorpicker".into());
         for tab in ["w1:t9", "w1:t4", "w1:t8", "w1:t9"] {
-            assert_eq!(app.handle(key(KeyCode::Right)), Action::Continue);
+            assert_eq!(app.handle(key(KeyCode::Tab)), Action::Continue);
             assert_eq!(
                 app.handle(key(KeyCode::Enter)),
                 Action::Switch(Target::Tab(tab.into()))
             );
         }
         for tab in ["w1:t8", "w1:t4", "w1:t9", "w1:t8"] {
-            app.handle(key(KeyCode::Left));
+            app.handle(key(KeyCode::BackTab));
             assert_eq!(
                 app.handle(key(KeyCode::Enter)),
                 Action::Switch(Target::Tab(tab.into()))
@@ -275,7 +275,7 @@ fn vertical_navigation_skips_tabs_and_uses_the_selected_tabs_owner() {
             parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap(),
             mode,
         );
-        app.handle(key(KeyCode::Right));
+        app.handle(key(KeyCode::Tab));
         app.handle(key(KeyCode::Down));
         assert_eq!(
             app.handle(key(KeyCode::Enter)),
@@ -287,7 +287,7 @@ fn vertical_navigation_skips_tabs_and_uses_the_selected_tabs_owner() {
             Action::Switch(Target::Workspace("w3".into()))
         );
         app.handle(key(KeyCode::Up));
-        app.handle(key(KeyCode::Right));
+        app.handle(key(KeyCode::Tab));
         app.handle(key(KeyCode::Up));
         assert_eq!(
             app.handle(key(KeyCode::Enter)),
@@ -312,17 +312,17 @@ fn flat_filtered_navigation_follows_relevance_and_retains_remembered_tab() {
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w1:t8".into()))
     );
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w1:t4".into()))
     );
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w1:t8".into()))
     );
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w1:t4".into()))
@@ -332,12 +332,12 @@ fn flat_filtered_navigation_follows_relevance_and_retains_remembered_tab() {
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w2:t2".into()))
     );
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w2:t7".into()))
     );
-    app.handle(key(KeyCode::Left));
+    app.handle(key(KeyCode::BackTab));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w2:t2".into()))
@@ -367,7 +367,7 @@ fn mouse_wheel_scrolls_and_keyboard_continues_from_selection() {
 }
 #[test]
 fn reopening_has_no_previous_query() {
-    assert_eq!(app().query, "");
+    assert_eq!(app().query(), "");
 }
 
 #[test]
@@ -459,7 +459,7 @@ fn worktree_enter_focuses_actual_workspace_and_nested_tab_enter_focuses_tab() {
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Workspace("w2".into()))
     );
-    app.handle(key(KeyCode::Left));
+    app.handle(key(KeyCode::BackTab));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w2:t2".into()))
@@ -556,7 +556,7 @@ fn ok_click_performs_enter_for_workspace_and_tab() {
         Action::Switch(Target::Workspace("w1".into()))
     );
     app.set_query("colorpicker".into());
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     assert_eq!(
         app.handle(click(
             ok.right() - 1,
@@ -585,7 +585,7 @@ fn cancel_closes_without_changing_query_or_selection() {
         )),
         Action::Close
     );
-    assert_eq!(app.query, "color");
+    assert_eq!(app.query(), "color");
     assert_eq!(app.selected, selected);
 }
 
@@ -673,7 +673,7 @@ fn appearance_changes_preserve_query_selection_and_scroll() {
         )),
         Action::Continue
     );
-    assert_eq!(app.query, "color");
+    assert_eq!(app.query(), "color");
     assert_eq!(app.selected, selected);
     assert_eq!(app.offset, offset);
     assert_eq!(
@@ -694,12 +694,12 @@ fn flat_interleaved_results_navigate_tabs_by_owner_and_workspaces_by_result_orde
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Workspace("w1".into()))
     );
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w1:t4".into()))
     );
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w1:t8".into()))
@@ -725,19 +725,19 @@ fn worktree_horizontal_navigation_stays_with_its_actual_owner_in_both_modes() {
             Action::Switch(Target::Workspace("w2".into()))
         );
         for tab in ["w2:t2", "w2:t1", "w2:t2"] {
-            app.handle(key(KeyCode::Right));
+            app.handle(key(KeyCode::Tab));
             assert_eq!(
                 app.handle(key(KeyCode::Enter)),
                 Action::Switch(Target::Tab(tab.into()))
             );
         }
-        app.handle(key(KeyCode::Left));
-        app.handle(key(KeyCode::Left));
+        app.handle(key(KeyCode::BackTab));
+        app.handle(key(KeyCode::BackTab));
         assert_eq!(
             app.handle(key(KeyCode::Enter)),
             Action::Switch(Target::Tab("w2:t2".into()))
         );
-        app.handle(key(KeyCode::Right));
+        app.handle(key(KeyCode::Tab));
         app.handle(key(KeyCode::Down));
         assert_eq!(
             app.handle(key(KeyCode::Enter)),
@@ -754,16 +754,16 @@ fn horizontal_navigation_cycles_a_sole_tab_and_ignores_empty_results() {
             mode,
         );
         app.set_query("exact terminal".into());
-        app.handle(key(KeyCode::Right));
-        app.handle(key(KeyCode::Left));
+        app.handle(key(KeyCode::Tab));
+        app.handle(key(KeyCode::BackTab));
         assert_eq!(
             app.handle(key(KeyCode::Enter)),
             Action::Switch(Target::Tab("w3:t1".into()))
         );
         assert_eq!(app.results.len(), 1);
         app.set_query("nonexistenttttt".into());
-        app.handle(key(KeyCode::Left));
-        app.handle(key(KeyCode::Right));
+        app.handle(key(KeyCode::BackTab));
+        app.handle(key(KeyCode::Tab));
         assert_eq!(app.selected, None);
         assert_eq!(app.handle(key(KeyCode::Enter)), Action::Continue);
     }
@@ -775,14 +775,14 @@ fn horizontal_navigation_sorts_by_tab_number_and_keeps_selection_visible() {
     snapshot.tabs.reverse();
     let mut app = App::new(snapshot, SearchMode::Hierarchical);
     app.set_query("colorpicker".into());
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w1:t9".into()))
     );
     app.ensure_visible(1);
     assert_eq!(app.offset, app.selected.unwrap());
-    app.handle(key(KeyCode::Left));
+    app.handle(key(KeyCode::BackTab));
     app.ensure_visible(1);
     assert_eq!(app.offset, 0);
 }
@@ -807,9 +807,9 @@ fn arrow_key_releases_do_not_move_selection() {
 }
 
 #[test]
-fn tab_and_shift_tab_match_arrow_keys_including_entry_and_wrap() {
+fn tab_and_shift_tab_cycle_including_entry_and_wrap() {
     for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
-        for forward in [key(KeyCode::Right), key(KeyCode::Tab)] {
+        for forward in [key(KeyCode::Tab)] {
             let mut app = App::new(
                 parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap(),
                 mode,
@@ -824,7 +824,6 @@ fn tab_and_shift_tab_match_arrow_keys_including_entry_and_wrap() {
             }
         }
         for backward in [
-            key(KeyCode::Left),
             key(KeyCode::BackTab),
             Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT)),
         ] {
@@ -874,7 +873,7 @@ fn vertical_boundary_keeps_tab_selection_and_workspace_moves_clear_it() {
 fn result_gaps_and_overflow_indicators_do_not_activate_destinations() {
     let mut app = app();
     app.set_query("colorpicker".into());
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     draw_app(&mut app, 24, 20);
     let tab = app
         .result_hits
@@ -899,7 +898,7 @@ fn result_gaps_and_overflow_indicators_do_not_activate_destinations() {
         Action::Continue
     );
     assert_eq!(app.selected_tab, Some(2));
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     draw_app(&mut app, 24, 20);
     assert_eq!(
         app.handle(click(23, tab.y, MouseEventKind::Down(MouseButton::Left))),
@@ -982,8 +981,6 @@ fn sole_tab_supports_all_cycle_controls_and_a_separate_mouse_target() {
             Action::Switch(Target::Tab("w3:t1".into()))
         );
         for event in [
-            key(KeyCode::Right),
-            key(KeyCode::Left),
             key(KeyCode::Tab),
             key(KeyCode::BackTab),
             Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT)),
@@ -1054,13 +1051,13 @@ fn workspace_preview_and_tab_navigation_start_from_remembered_tab() {
             app.handle(key(KeyCode::Enter)),
             Action::Switch(Target::Workspace("w1".into()))
         );
-        app.handle(key(KeyCode::Right));
+        app.handle(key(KeyCode::Tab));
         assert_eq!(
             app.handle(key(KeyCode::Enter)),
             Action::Switch(Target::Tab("w1:t9".into()))
         );
         app.set_query("colorpicker".into());
-        app.handle(key(KeyCode::Left));
+        app.handle(key(KeyCode::BackTab));
         assert_eq!(
             app.handle(key(KeyCode::Enter)),
             Action::Switch(Target::Tab("w1:t4".into()))
@@ -1088,14 +1085,14 @@ fn nested_search_enter_activates_matching_tab_without_navigation() {
 fn query_edits_replace_manual_tab_selection_and_clearing_restores_first_workspace() {
     let mut app = app();
     app.set_query("colorpicker".into());
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     app.handle(Event::Paste(" codex".into()));
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w1:t8".into()))
     );
     app.handle(key(KeyCode::Backspace));
-    assert_eq!(app.query, "colorpicker code");
+    assert_eq!(app.query(), "colorpicker code");
     assert_eq!(
         app.handle(key(KeyCode::Enter)),
         Action::Switch(Target::Tab("w1:t4".into()))
@@ -1120,7 +1117,7 @@ fn initial_and_vertical_workspace_selection_preview_remembered_tabs() {
     assert_eq!(app.selected_tab, None);
     app.handle(key(KeyCode::Up));
     assert_eq!(app.highlighted_tab(), Some(0));
-    app.handle(key(KeyCode::Right));
+    app.handle(key(KeyCode::Tab));
     assert_eq!(app.highlighted_tab(), Some(1));
     app.handle(key(KeyCode::Down));
     assert_eq!(app.highlighted_tab(), Some(1));
@@ -1142,5 +1139,78 @@ fn equal_tab_scores_keep_first_workspace_as_winner_without_name_bias() {
             app.handle(key(KeyCode::Enter)),
             Action::Switch(Target::Tab("w2:t7".into()))
         );
+    }
+}
+
+#[test]
+fn cursor_arrows_preserve_results_tab_selection_scroll_and_hit_targets() {
+    for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
+        let mut app = App::new(
+            parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap(),
+            mode,
+        );
+        app.set_query("colorpicker".into());
+        app.handle(key(KeyCode::Tab));
+        draw_app(&mut app, 80, 20);
+        let selected = app.selected;
+        let tab = app.selected_tab;
+        let offset = app.offset;
+        let hits = app.result_hits.len();
+        app.handle(key(KeyCode::Left));
+        app.handle(key(KeyCode::Right));
+        assert_eq!(app.query(), "colorpicker");
+        assert_eq!(app.input().cursor(), 11);
+        assert_eq!(app.selected, selected);
+        assert_eq!(app.selected_tab, tab);
+        assert_eq!(app.offset, offset);
+        assert_eq!(app.result_hits.len(), hits);
+    }
+}
+
+#[test]
+fn picker_backspace_inserts_and_pastes_at_cursor_in_both_modes() {
+    for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
+        let mut app = App::new(
+            parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap(),
+            mode,
+        );
+        app.set_query("colorpickxr".into());
+        app.handle(key(KeyCode::Left));
+        app.handle(key(KeyCode::Backspace));
+        assert_eq!(app.query(), "colorpickr");
+        app.handle(key(KeyCode::Char('e')));
+        assert_eq!(app.query(), "colorpicker");
+        assert_eq!(
+            app.handle(key(KeyCode::Enter)),
+            Action::Switch(Target::Workspace("w1".into()))
+        );
+        app.handle(Event::Paste("\nX".into()));
+        assert_eq!(app.query(), "colorpickeXr");
+    }
+}
+
+#[test]
+fn picker_clear_shortcuts_clear_every_cursor_position_and_restore_results() {
+    for mode in [SearchMode::Hierarchical, SearchMode::Flat] {
+        for (code, modifiers) in [
+            (KeyCode::Backspace, KeyModifiers::SUPER),
+            (KeyCode::Char('u'), KeyModifiers::CONTROL),
+        ] {
+            for lefts in [0, 2, 4] {
+                let mut app = App::new(
+                    parse_snapshot(include_bytes!("fixtures/snapshot.json")).unwrap(),
+                    mode,
+                );
+                app.set_query("zzzz".into());
+                for _ in 0..lefts {
+                    app.handle(key(KeyCode::Left));
+                }
+                app.handle(Event::Key(KeyEvent::new(code, modifiers)));
+                assert_eq!(app.query(), "");
+                assert_eq!(app.input().cursor(), 0);
+                assert_eq!(app.results.len(), 3);
+                assert_eq!(app.selected, Some(0));
+            }
+        }
     }
 }

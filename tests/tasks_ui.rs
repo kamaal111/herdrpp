@@ -140,3 +140,39 @@ fn only_a_known_foreground_shell_is_idle() {
     ));
     assert!(!idle(&json!({})));
 }
+
+#[test]
+fn task_search_uses_cursor_editing_and_single_character_backspace() {
+    let mut app = task_app();
+    app.set_query("dev servxr".into());
+    app.handle(key(KeyCode::Left));
+    app.handle(key(KeyCode::Backspace));
+    assert_eq!(app.query(), "dev servr");
+    app.handle(key(KeyCode::Char('e')));
+    assert_eq!(app.query(), "dev server");
+    assert_eq!(app.results.len(), 1);
+    app.handle(key(KeyCode::Right));
+    app.handle(Event::Paste("\n!".into()));
+    assert_eq!(app.query(), "dev server!");
+}
+
+#[test]
+fn task_search_clear_shortcuts_clear_every_cursor_position() {
+    for (code, modifiers) in [
+        (KeyCode::Backspace, KeyModifiers::SUPER),
+        (KeyCode::Char('u'), KeyModifiers::CONTROL),
+    ] {
+        for lefts in [0, 2, 4] {
+            let mut app = task_app();
+            app.set_query("zzzz".into());
+            for _ in 0..lefts {
+                app.handle(key(KeyCode::Left));
+            }
+            app.handle(Event::Key(KeyEvent::new(code, modifiers)));
+            assert_eq!(app.query(), "");
+            assert_eq!(app.input().cursor(), 0);
+            assert_eq!(app.results.len(), 1);
+            assert_eq!(app.selected, Some(0));
+        }
+    }
+}

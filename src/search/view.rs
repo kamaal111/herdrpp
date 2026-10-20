@@ -1,3 +1,4 @@
+use super::input::TextInput;
 use crate::picker::theme::Palette;
 use ratatui::{
     Frame,
@@ -25,7 +26,7 @@ pub fn render_input(
     input_area: Rect,
     separator_area: Rect,
     palette: Palette,
-    query: &str,
+    input: &TextInput,
     placeholder: &str,
     count: usize,
 ) {
@@ -34,7 +35,7 @@ pub fn render_input(
         input_area,
         separator_area,
         palette,
-        (query, false),
+        input,
         placeholder,
         count,
     );
@@ -45,15 +46,14 @@ pub fn render_name_input(
     input_area: Rect,
     separator_area: Rect,
     palette: Palette,
-    input: &str,
-    selected: bool,
+    input: &TextInput,
 ) {
     render_input_state(
         frame,
         input_area,
         separator_area,
         palette,
-        (input, selected),
+        input,
         "Enter a name",
         1,
     );
@@ -64,22 +64,20 @@ fn render_input_state(
     input_area: Rect,
     separator_area: Rect,
     palette: Palette,
-    (query, selected): (&str, bool),
+    input: &TextInput,
     placeholder: &str,
     count: usize,
 ) {
     let count = format!(" {} results ", count);
     let input_width = usize::from(input_area.width).saturating_sub(count.len());
-    let prompt = if query.is_empty() { placeholder } else { query };
-    let mut tail: String = prompt.to_owned();
-    while tail.width() > input_width.saturating_sub(2) && !tail.is_empty() {
-        tail.remove(0);
-    }
+    let query = input.text();
+    let edit_width = input_width.saturating_sub(2);
+    let (tail, cursor_cells) = input_window(input, placeholder, edit_width);
     let mut header = vec![
         Span::raw("> "),
         Span::styled(
             tail.clone(),
-            if selected && !query.is_empty() {
+            if input.selected() && !query.is_empty() {
                 palette
                     .base_style()
                     .bg(palette.selection_bg)
@@ -105,15 +103,40 @@ fn render_input_state(
             .style(palette.base_style().fg(palette.overlay0)),
         separator_area,
     );
-    let cursor_x = (input_area.x
-        + 2
-        + if query.is_empty() {
-            0
-        } else {
-            tail.width() as u16
-        })
-    .min(input_area.right().saturating_sub(1));
-    frame.set_cursor_position((cursor_x, input_area.y));
+    if edit_width > 0 && input_area.height > 0 {
+        frame.set_cursor_position((input_area.x + 2 + cursor_cells as u16, input_area.y));
+    }
+}
+
+fn input_window(input: &TextInput, placeholder: &str, width: usize) -> (String, usize) {
+    if input.text().is_empty() {
+        let mut tail = placeholder.to_owned();
+        while tail.width() > width && !tail.is_empty() {
+            tail.remove(0);
+        }
+        return (tail, 0);
+    }
+    let text = input.text();
+    let mut start = 0;
+    let mut cursor_cells = text[..input.cursor()].width();
+    for (index, ch) in text[..input.cursor()].char_indices() {
+        if cursor_cells < width {
+            break;
+        }
+        cursor_cells = cursor_cells.saturating_sub(ch.width().unwrap_or(0));
+        start = index + ch.len_utf8();
+    }
+    let mut visible = String::new();
+    let mut used = 0;
+    for ch in text[start..].chars() {
+        let cells = ch.width().unwrap_or(0);
+        if used + cells > width {
+            break;
+        }
+        visible.push(ch);
+        used += cells;
+    }
+    (visible, cursor_cells)
 }
 
 /// Truncate by terminal cells, keeping character indices aligned with nucleo.

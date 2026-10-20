@@ -51,10 +51,10 @@ fn draw(app: &mut App, width: u16, height: u16) -> String {
 fn typing_paste_and_backspace_filter_and_empty_enter_does_nothing() {
     let mut app = app();
     app.handle(Event::Paste("SPL\n RGT".into()));
-    assert_eq!(app.query, "SPL RGT");
+    assert_eq!(app.query(), "SPL RGT");
     assert_eq!(app.items[app.results[0].item].title, "Split Pane Right");
     app.handle(key(KeyCode::Backspace));
-    assert_eq!(app.query, "SPL RG");
+    assert_eq!(app.query(), "SPL RG");
     app.set_query("nonexistent".into());
     assert_eq!(app.handle(key(KeyCode::Enter)), Action::Continue);
     assert!(draw(&mut app, 80, 20).contains("No matching commands"));
@@ -100,7 +100,7 @@ fn clear_shortcuts_restore_commands_selection_scroll_and_click_targets() {
             app.handle(Event::Key(KeyEvent::new(code, modifiers))),
             Action::Continue
         );
-        assert_eq!(app.query, "");
+        assert_eq!(app.query(), "");
         assert_eq!(app.results.len(), 16);
         assert_eq!(app.selected, Some(0));
         assert_eq!(app.offset, 0);
@@ -135,12 +135,11 @@ fn clear_shortcuts_clear_rename_input_and_validation_error_without_leaving_promp
             app.mode,
             Mode::Name {
                 item,
-                input: String::new(),
-                error: false,
-                selected: false
+                input: Default::default(),
+                error: false
             }
         );
-        assert_eq!(app.query, "Rename Tab");
+        assert_eq!(app.query(), "Rename Tab");
         assert_eq!(app.handle(key(KeyCode::Enter)), Action::Continue);
         assert!(draw(&mut app, 80, 20).contains("Enter a nonblank name"));
         app.handle(Event::Key(KeyEvent::new(code, modifiers)));
@@ -148,9 +147,8 @@ fn clear_shortcuts_clear_rename_input_and_validation_error_without_leaving_promp
             app.mode,
             Mode::Name {
                 item,
-                input: String::new(),
-                error: false,
-                selected: false
+                input: Default::default(),
+                error: false
             }
         );
         app.handle(Event::Paste("New name".into()));
@@ -180,7 +178,7 @@ fn clear_shortcuts_leave_close_confirmation_unchanged() {
         KeyModifiers::CONTROL,
     )));
     assert_eq!(app.mode, Mode::Confirm { item });
-    assert_eq!(app.query, "Close Tab");
+    assert_eq!(app.query(), "Close Tab");
 }
 
 #[test]
@@ -194,10 +192,10 @@ fn clear_key_releases_do_not_edit_and_plain_u_still_types() {
         let mut release = KeyEvent::new(code, modifiers);
         release.kind = terminal_input::event::KeyEventKind::Release;
         assert_eq!(app.handle(Event::Key(release)), Action::Continue);
-        assert_eq!(app.query, "split");
+        assert_eq!(app.query(), "split");
     }
     app.handle(key(KeyCode::Char('u')));
-    assert_eq!(app.query, "splitu");
+    assert_eq!(app.query(), "splitu");
 }
 
 #[test]
@@ -222,7 +220,7 @@ fn rename_rejects_blank_input_preserves_literal_unicode_and_escape_returns_to_re
     );
     assert_eq!(app.handle(key(KeyCode::Esc)), Action::Continue);
     assert_eq!(app.mode, Mode::Search);
-    assert_eq!(app.query, "Rename Tab");
+    assert_eq!(app.query(), "Rename Tab");
     assert_eq!(app.handle(key(KeyCode::Esc)), Action::Cancel);
 }
 
@@ -314,9 +312,8 @@ fn rename_prompts_prefill_each_existing_name_and_append_edits() {
             app.mode,
             Mode::Name {
                 item,
-                input: name.into(),
-                error: false,
-                selected: false
+                input: herdrpp::search::input::TextInput::new(name.into(), false),
+                error: false
             }
         );
         assert!(draw(&mut app, 80, 20).contains(&format!("> {name}")));
@@ -353,9 +350,8 @@ fn creation_prompts_select_suggestions_and_typing_or_paste_replaces_them() {
             app.mode,
             Mode::Name {
                 item,
-                input: suggestion.into(),
-                error: false,
-                selected: true
+                input: herdrpp::search::input::TextInput::new(suggestion.into(), true),
+                error: false
             }
         );
         assert!(draw(&mut app, 80, 20).contains("Enter Create"));
@@ -407,7 +403,7 @@ fn creation_accepts_default_or_blank_and_escape_restores_results() {
     );
     assert_eq!(app.handle(key(KeyCode::Esc)), Action::Continue);
     assert_eq!(app.mode, Mode::Search);
-    assert_eq!(app.query, "New Tab");
+    assert_eq!(app.query(), "New Tab");
     assert_eq!(app.handle(key(KeyCode::Esc)), Action::Cancel);
 }
 
