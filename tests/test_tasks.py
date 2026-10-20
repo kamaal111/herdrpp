@@ -202,6 +202,72 @@ class TestTaskOwner(TaskOwnerHarness):
         assert "unknown palette command" in stderr
         assert self.requests == []
 
+    @pytest.fixture(params=[False, True], ids=["worktree", "git-root"])
+    def ancestor_checkout(self, request):
+        if request.param:
+            subprocess.run(["git", "init", str(self.checkout)], check=True, capture_output=True)
+            self.snapshot["workspaces"][0].pop("worktree")
+            self.save_snapshot()
+
+    def test_ancestor_tasks_launch_from_checkout(self, ancestor_checkout):
+        parent_file = self.root / ".herdr/tasks.json"
+        parent_file.parent.mkdir()
+        self.task_file.replace(parent_file)
+        directory = self.start()
+        catalog = json.loads((directory / "catalog.json").read_text())
+        assert [item["title"] for item in catalog["items"]] == ["dev"]
+        self.choose(directory)
+        created = next(r["params"] for r in self.requests if r["method"] == "tab.create")
+        assert created["cwd"] == str(self.checkout.resolve())
+        text = next(r["params"]["text"] for r in self.requests if r["method"] == "pane.send_text")
+        assert text.startswith("/bin/sh -c 'cd ")
+        assert str(self.checkout.resolve()) in text
+
+    @pytest.mark.parametrize("contents,diagnostic", [
+        ("[]", "No tasks configured"),
+        ("[{", "line 1 column"),
+        ('[{"label":"broken","command":null}]', "nonblank string"),
+    ])
+    def test_nearest_ancestor_empty_or_invalid_file_blocks_fallback(self, contents, diagnostic):
+        farther_file = self.root / ".herdr/tasks.json"
+        farther_file.parent.mkdir()
+        self.task_file.replace(farther_file)
+        nearest = self.root / "projects"
+        (nearest / ".herdr").mkdir(parents=True)
+        nearest_file = nearest / ".herdr/tasks.json"
+        nearest_file.write_text(contents)
+        checkout = nearest / "api"
+        checkout.mkdir()
+        self.snapshot["workspaces"][0]["worktree"]["checkout_path"] = str(checkout)
+        self.save_snapshot()
+        directory = self.start()
+        catalog = json.loads((directory / "catalog.json").read_text())
+        assert catalog["items"] == []
+        assert str(nearest_file) in catalog["warning"]
+        assert diagnostic in catalog["warning"]
+        self.select(directory, None)
+        assert self.requests == []
+
+    def test_checkout_tasks_override_parent_tasks(self):
+        parent_file = self.root / ".herdr/tasks.json"
+        parent_file.parent.mkdir()
+        parent_file.write_text('[{"label":"parent","command":"false"}]')
+        directory = self.start()
+        catalog = json.loads((directory / "catalog.json").read_text())
+        assert [item["title"] for item in catalog["items"]] == ["dev"]
+        self.select(directory, None)
+        assert self.requests == []
+
+    def test_missing_file_explains_ancestor_search(self):
+        self.task_file.unlink()
+        directory = self.start()
+        catalog = json.loads((directory / "catalog.json").read_text())
+        assert catalog["items"] == []
+        assert str(self.task_file) in catalog["warning"]
+        assert "Searched the checkout and up to 10 parent folders." in catalog["warning"]
+        self.select(directory, None)
+        assert self.requests == []
+
     def test_corrected_file_is_reloaded_on_next_open(self):
         self.task_file.write_text('[{"label":"dev","command":null}]')
         directory = self.start()
