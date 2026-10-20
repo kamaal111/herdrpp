@@ -99,7 +99,17 @@ pub fn validate_selection<'a>(items: &'a [Item], selection: &Selection) -> Resul
     Ok(command)
 }
 
-fn load(api: &Herdr, mut catalog: Catalog, cancelled: &AtomicBool) -> Catalog {
+fn load(
+    api: &Herdr,
+    mut catalog: Catalog,
+    cancelled: &AtomicBool,
+    repo_directory: Option<&Path>,
+) -> Catalog {
+    if let Some(directory) = repo_directory
+        && let Ok(Some(item)) = super::repository::item(directory, cancelled)
+    {
+        catalog.items.push(item);
+    }
     catalog.naming.resolve_workspace_suggestion(cancelled);
     let plugins = (|| {
         let plugins = decode(&api.call_cancellable(&["plugin", "list", "--json"], cancelled)?)?;
@@ -124,6 +134,7 @@ fn owner(
     initial_catalog: Catalog,
     cancelled: &AtomicBool,
     tasks: bool,
+    repo_directory: Option<&Path>,
 ) -> Result<Option<(Catalog, Selection)>> {
     thread::scope(|scope| {
         let (sender, receiver) = mpsc::channel();
@@ -131,7 +142,7 @@ fn owner(
             let _ = sender.send(if tasks {
                 crate::tasks::load(api, context)
             } else {
-                load(api, initial_catalog, cancelled)
+                load(api, initial_catalog, cancelled, repo_directory)
             });
         });
         let result = (|| {
@@ -239,6 +250,7 @@ pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
     if !tasks && let Some(item) = super::pull_request::item_from_snapshot(&snapshot, &context) {
         items.push(item);
     }
+    let repo_directory = super::repository::directory_from_snapshot(&snapshot, &context);
     let initial_catalog = Catalog {
         tasks,
         recent_ids: vec![],
@@ -265,6 +277,7 @@ pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
         initial_catalog,
         &cancelled,
         tasks,
+        repo_directory.as_deref(),
     )?;
     if let Some((catalog, selection)) = selected {
         let command = validate_selection(&catalog.items, &selection)?;

@@ -221,6 +221,14 @@ and client-only actions such as Settings, Help, and Toggle Sidebar are outside
 this version's coverage. Discovery failures leave built-ins available with a
 warning; reopen to refresh the catalog.
 
+**Open Repo** appears when the opening workspace has a detectable repository
+URL in its local Git remotes. It prefers the branch's tracking remote, then a
+sole eligible repository; ambiguous remotes leave the command hidden. It works
+without GitHub CLI access or a PR status, including on detached HEAD with a sole
+remote. Selecting it opens the captured repository URL in the default browser
+on the machine running the plugin (`open` on macOS, `xdg-open` on Linux).
+Reopen the palette to refresh detection.
+
 **View Pull Request** appears when the opening workspace has a PR number in
 its sidebar status, including draft, closed, and merged PRs. Selecting it opens
 that PR in the system's default browser on the machine running the plugin

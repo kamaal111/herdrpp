@@ -24,29 +24,13 @@ pub struct Remote {
 }
 
 pub fn parse_remote(value: &str) -> Option<Remote> {
-    let value = value.trim();
-    let (host, path) = if let Some(rest) = value
-        .strip_prefix("https://")
-        .or_else(|| value.strip_prefix("http://"))
-        .or_else(|| value.strip_prefix("ssh://"))
-    {
-        let (authority, path) = rest.split_once('/')?;
-        (authority.rsplit('@').next()?.split(':').next()?, path)
-    } else {
-        let (authority, path) = value.split_once(':')?;
-        (authority.rsplit('@').next()?, path)
-    };
-    let path = path
-        .trim_end_matches('/')
-        .strip_suffix(".git")
-        .unwrap_or(path.trim_end_matches('/'));
-    let parts: Vec<_> = path.split('/').collect();
-    if host.is_empty() || parts.len() != 2 || parts.iter().any(|s| s.is_empty()) {
+    let remote = crate::repository::parse_remote(value)?;
+    if remote.repository.split('/').count() != 2 {
         return None;
     }
     Some(Remote {
-        host: host.to_owned(),
-        repository: path.to_owned(),
+        host: remote.host,
+        repository: remote.repository,
     })
 }
 

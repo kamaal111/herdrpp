@@ -413,3 +413,93 @@ class TestPalettePullRequest(PaletteOwnerHarness):
         directory = self.start()
         assert launcher + " unavailable" in self.select_pr_failure(directory)
         assert len(self.logged_calls(launcher)) == 1
+
+
+class TestPaletteOpenRepo(PaletteOwnerHarness):
+    @pytest.fixture(autouse=True)
+    def repo_setup(self, setup):
+        self.project = self.root / "project"
+        self.project.mkdir()
+        self.env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        subprocess.run(["git", "init", "-q", "-b", "feature", str(self.project)], env=self.env, check=True)
+        subprocess.run(["git", "-C", str(self.project), "remote", "add", "company", "git@github.com:kamaal111/herdrpp.git"], env=self.env, check=True)
+        fake_bin = self.root / "bin"
+        fake_bin.mkdir()
+        for name in ("gh", "open", "xdg-open"):
+            fake = fake_bin / name
+            fake.write_text(PR_FAKE)
+            fake.chmod(0o700)
+        self.env["PATH"] = str(fake_bin) + os.pathsep + self.env["PATH"]
+        self.snapshot = {
+            "workspaces":[{"workspace_id":"w2", "active_tab_id":"w2:t7", "worktree":{"checkout_path":str(self.project)}}],
+            "tabs":[{"workspace_id":"w2", "tab_id":"w2:t7"}],
+            "panes":[{"workspace_id":"w2", "tab_id":"w2:t7", "pane_id":"w2:p8"}],
+            "layouts":[]
+        }
+        (self.root / "snapshot.json").write_text(json.dumps(self.snapshot))
+        self.launcher = {"darwin":"open", "linux":"xdg-open"}[sys.platform]
+
+    def selection(self):
+        return {"id":"herdr:open_repo", "input":None, "confirmed":False}
+
+    def failure(self, directory):
+        (directory / "selection.json").write_text(json.dumps(self.selection()))
+        with pytest.raises(subprocess.TimeoutExpired):
+            self.process.communicate(timeout=0.15)
+        assert not (self.root / (self.launcher + "-calls")).exists()
+        self.close_popup()
+        stdout, stderr = self.process.communicate(timeout=8)
+        assert self.process.returncode == 1, (stdout, stderr)
+        return stderr
+
+    def test_opens_captured_url_without_pr_or_gh_only_after_teardown(self):
+        directory = self.start()
+        catalog = json.loads((directory / "catalog.json").read_text())
+        assert [item["title"] for item in catalog["items"] if item["id"] == "herdr:open_repo"] == ["Open Repo"]
+        subprocess.run(["git", "-C", str(self.project), "remote", "set-url", "company", "https://gitlab.com/team/changed.git"], env=self.env, check=True)
+        self.select(directory, self.selection())
+        calls = [json.loads(line) for line in (self.root / (self.launcher + "-calls")).read_text().splitlines()]
+        assert [call["args"] for call in calls] == [["https://github.com/kamaal111/herdrpp"]]
+        assert not (self.root / "gh-calls").exists()
+
+    def test_cancellation_does_not_launch_browser(self):
+        directory = self.start()
+        self.select(directory, None)
+        assert not (self.root / (self.launcher + "-calls")).exists()
+        assert not (self.root / "gh-calls").exists()
+
+    def test_ambiguous_remotes_hide_command(self):
+        subprocess.run(["git", "-C", str(self.project), "remote", "add", "other", "https://gitlab.com/team/app.git"], env=self.env, check=True)
+        directory = self.start()
+        catalog = json.loads((directory / "catalog.json").read_text())
+        assert "herdr:open_repo" not in [item["id"] for item in catalog["items"]]
+        self.select(directory, None)
+        assert not (self.root / (self.launcher + "-calls")).exists()
+
+    def test_disappeared_context_prevents_browser_launch(self):
+        directory = self.start()
+        self.snapshot["tabs"] = []
+        (self.root / "snapshot.json").write_text(json.dumps(self.snapshot))
+        assert "original tab is no longer available" in self.failure(directory)
+        assert not (self.root / (self.launcher + "-calls")).exists()
+
+    def test_launcher_failure_is_reported(self):
+        self.env["PALETTE_TEST_FAIL"] = self.launcher
+        directory = self.start()
+        assert self.launcher + " unavailable" in self.failure(directory)
+
+    def test_plugin_discovery_failure_does_not_hide_repo(self):
+        self.env["PALETTE_TEST_DISCOVERY_FAIL"] = "1"
+        directory = self.start()
+        catalog = json.loads((directory / "catalog.json").read_text())
+        assert "herdr:open_repo" in [item["id"] for item in catalog["items"]]
+        assert "Plugin commands unavailable" in catalog["warning"]
+        self.select(directory, None)
+
+    def test_task_mode_does_not_include_repository_command(self):
+        self.action = "tasks"
+        directory = self.start()
+        catalog = json.loads((directory / "catalog.json").read_text())
+        assert "herdr:open_repo" not in [item["id"] for item in catalog["items"]]
+        self.select(directory, None)
+        assert not (self.root / "gh-calls").exists()

@@ -83,7 +83,10 @@ pub fn validate_context(snapshot: &Value, context: &Context) -> Result<()> {
 pub fn arguments(command: &Command, context: &Context) -> Result<Option<Vec<String>>> {
     let required = |scope: Scope| scope.id(context).context("command target is unavailable");
     let args: Vec<String> = match command {
-        Command::SearchWorkspaces | Command::Task { .. } | Command::ViewPullRequest { .. } => {
+        Command::SearchWorkspaces
+        | Command::Task { .. }
+        | Command::ViewPullRequest { .. }
+        | Command::OpenRepo { .. } => {
             return Ok(None);
         }
         Command::Plugin { .. } => return Ok(None),
@@ -177,9 +180,10 @@ pub fn execute(
             crate::tasks::runner::execute(api, socket, context, root, task)
         }
         Command::SearchWorkspaces => api.open(),
+        Command::OpenRepo { url } => super::repository::open_url(url),
         Command::ViewPullRequest { number, directory } => {
             let url = crate::pr::github::pull_request_url(directory, *number)?;
-            super::pull_request::open_url(&url)
+            super::repository::open_url(&url)
         }
         Command::Create(scope) => {
             let (method, params) = create_request(*scope, context, naming, input)?;

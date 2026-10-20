@@ -81,6 +81,9 @@ pub enum Command {
         root: std::path::PathBuf,
     },
     SearchWorkspaces,
+    OpenRepo {
+        url: String,
+    },
     ViewPullRequest {
         number: u64,
         directory: std::path::PathBuf,
