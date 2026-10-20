@@ -34,7 +34,7 @@ fn normal_palette_contains_input_count_results_and_help() {
     assert!(rendered.contains("Search workspaces, worktrees and tabs"));
     assert!(rendered.contains("3 results"));
     assert!(rendered.contains("ColorPicker"));
-    assert!(rendered.contains("↑↓/Ctrl+P,N Workspaces  ←→/Tab/Shift+Tab Tabs"));
+    assert!(rendered.contains("↑↓/Ctrl+P,N Workspaces  ←→ Cursor  Tab/Shift+Tab Tabs"));
     assert!(rendered.contains("↵ OK"));
     assert!(rendered.contains("Esc Cancel"));
     assert!(!rendered.contains("Enter Switch"));
@@ -228,10 +228,7 @@ fn nested_unicode_breadcrumb_truncates_without_moving_tabs_below_workspace() {
     snapshot.workspaces[1].label = "世界herdrpp".into();
     let mut app = App::new(snapshot, SearchMode::Flat);
     app.set_query("世界 multimachine codex".into());
-    app.handle(Event::Key(KeyEvent::new(
-        KeyCode::Right,
-        KeyModifiers::NONE,
-    )));
+    app.handle(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
     let buffer = app_buffer(&mut app, 24);
     let text: String = (0..24).map(|x| buffer[(x, 2)].symbol()).collect();
     assert!(text.contains("[· Codex]"));
@@ -348,10 +345,7 @@ fn dracula_hierarchy_colors_selected_root_worktree_and_tab_names() {
 #[test]
 fn dracula_flat_breadcrumb_keeps_each_type_color_on_selected_row() {
     let mut app = colored_worktree_app(SearchMode::Flat, "herdrpp multimachine codex");
-    app.handle(Event::Key(KeyEvent::new(
-        KeyCode::Right,
-        KeyModifiers::NONE,
-    )));
+    app.handle(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
     let buffer = app_buffer(&mut app, 80);
     assert_eq!(buffer[(3, 2)].fg, ratatui::style::Color::Rgb(189, 147, 249));
     assert_eq!(buffer[(18, 2)].fg, ratatui::style::Color::Rgb(80, 250, 123));
@@ -375,10 +369,7 @@ fn dracula_single_tab_worktree_and_tab_have_separate_colors() {
 #[test]
 fn truncated_workspace_and_tab_keep_type_colors() {
     let mut app = colored_worktree_app(SearchMode::Flat, "herdrpp multimachine codex");
-    app.handle(Event::Key(KeyEvent::new(
-        KeyCode::Right,
-        KeyModifiers::NONE,
-    )));
+    app.handle(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
     let buffer = app_buffer(&mut app, 24);
     assert_eq!(buffer[(3, 2)].fg, app.theme.palette().accent);
     assert_eq!(buffer[(7, 2)].fg, app.theme.palette().green);
@@ -389,10 +380,7 @@ fn truncated_workspace_and_tab_keep_type_colors() {
 #[test]
 fn appearance_updates_apply_custom_type_colors_without_changing_navigation() {
     let mut app = colored_worktree_app(SearchMode::Flat, "herdrpp multimachine codex");
-    app.handle(Event::Key(KeyEvent::new(
-        KeyCode::Right,
-        KeyModifiers::NONE,
-    )));
+    app.handle(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
     app.theme = herdrpp::picker::theme::Theme::parse("[theme]\nname = 'dracula'\nauto_switch = true\nlight_name = 'one-light'\n[theme.custom]\naccent = '#123456'\ngreen = '#654321'\noverlay0 = '#abcdef'\n[theme.custom.light]\ngreen = '#102030'").unwrap();
     let dark = app_buffer(&mut app, 80);
     assert_eq!(dark[(3, 2)].fg, ratatui::style::Color::Rgb(18, 52, 86));
@@ -411,7 +399,7 @@ fn appearance_updates_apply_custom_type_colors_without_changing_navigation() {
         light[(36, 2)].bg,
         herdrpp::picker::theme::Palette::one_light().selection_bg
     );
-    assert_eq!(app.query, "herdrpp multimachine codex");
+    assert_eq!(app.query(), "herdrpp multimachine codex");
     assert_eq!(app.selected, selected);
     assert_eq!(app.offset, offset);
 }
@@ -427,15 +415,18 @@ fn dracula_single_tab_root_colors_workspace_and_tab_separately() {
 }
 
 #[test]
-fn narrow_footer_keeps_both_arrow_navigation_hints_visible() {
+fn narrow_footer_keeps_workspace_and_tab_navigation_hints_visible() {
     let rendered = draw(23, 20, "codex");
-    assert!(rendered.contains("↑↓ Workspaces ←→/Tab"));
+    assert!(rendered.contains("↑↓ Workspaces Tab Tabs"));
 }
 
 #[test]
 fn selected_tab_scrolls_into_view_and_wrap_resets_the_horizontal_window() {
     let mut app = colored_worktree_app(SearchMode::Hierarchical, "multimachine");
-    app.handle(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
+    app.handle(Event::Key(KeyEvent::new(
+        KeyCode::BackTab,
+        KeyModifiers::NONE,
+    )));
     let buffer = app_buffer(&mut app, 24);
     let text: String = (0..24).map(|x| buffer[(x, 2)].symbol()).collect();
     assert!(text.contains("◀[· Terminal]"), "{text:?}");
@@ -450,10 +441,7 @@ fn selected_tab_scrolls_into_view_and_wrap_resets_the_horizontal_window() {
         app.theme.palette().selection_bg
     );
     assert_eq!(buffer[(5, 2)].bg, app.theme.palette().panel_bg);
-    app.handle(Event::Key(KeyEvent::new(
-        KeyCode::Right,
-        KeyModifiers::NONE,
-    )));
+    app.handle(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
     let buffer = app_buffer(&mut app, 24);
     let text: String = (0..24).map(|x| buffer[(x, 2)].symbol()).collect();
     assert!(text.contains("[· Codex]"));
@@ -467,7 +455,10 @@ fn horizontal_strip_truncates_wide_unicode_labels_by_cell_width() {
     snapshot.tabs[0].label = "世界世界世界世界".into();
     let mut app = App::new(snapshot, SearchMode::Hierarchical);
     app.set_query("colorpicker".into());
-    app.handle(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
+    app.handle(Event::Key(KeyEvent::new(
+        KeyCode::BackTab,
+        KeyModifiers::NONE,
+    )));
     let buffer = app_buffer(&mut app, 24);
     let hit = app
         .result_hits

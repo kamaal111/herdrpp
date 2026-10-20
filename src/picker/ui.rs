@@ -369,7 +369,7 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
         chunks[0],
         chunks[1],
         palette,
-        &app.query,
+        app.input(),
         "Search workspaces, worktrees and tabs",
         app.results.len(),
     );
@@ -390,16 +390,16 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
     let position = app.selected.map(|i| i + 1).unwrap_or(0);
     let help = if area.width >= 65 {
         format!(
-            " ↑↓/Ctrl+P,N Workspaces  ←→/Tab/Shift+Tab Tabs  {position}/{}",
+            " ↑↓/Ctrl+P,N Workspaces  ←→ Cursor  Tab/Shift+Tab Tabs  {position}/{}",
             app.results.len()
         )
     } else if area.width >= 40 {
         format!(
-            " ↑↓ Workspaces  ←→/Tab Tabs  {position}/{}",
+            " ↑↓ Workspaces  Tab/Shift+Tab Tabs  {position}/{}",
             app.results.len()
         )
     } else {
-        " ↑↓ Workspaces ←→/Tab".to_owned()
+        " ↑↓ Workspaces Tab Tabs".to_owned()
     };
     frame.render_widget(
         Paragraph::new(help).style(palette.base_style().fg(palette.overlay1)),

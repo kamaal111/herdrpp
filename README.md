@@ -147,11 +147,13 @@ mode values are errors. See [plugin settings](examples/config.toml).
 | Input | Action |
 | --- | --- |
 | Typing / paste | Filter immediately |
+| ← / → | Move the text cursor |
+| Backspace | Delete one character before the cursor |
 | Cmd+Backspace / Ctrl+U | Clear the search query |
 | ↑ / Ctrl+P | Previous workspace or worktree |
 | ↓ / Ctrl+N | Next workspace or worktree |
-| → / Tab | Next displayed tab from the highlighted tab, wrapping |
-| ← / Shift+Tab | Previous displayed tab from the highlighted tab, wrapping |
+| Tab | Next displayed tab from the highlighted tab, wrapping |
+| Shift+Tab | Previous displayed tab from the highlighted tab, wrapping |
 | Enter / click ↵ OK | Focus selection and exit |
 | Esc / Ctrl+C / click Esc Cancel | Exit without switching |
 | Left click | Focus the clicked workspace or tab and exit |
@@ -159,7 +161,7 @@ mode values are errors. See [plugin settings](examples/config.toml).
 
 Selecting a workspace highlights both its name and its remembered tab, so
 Enter's destination is visible. The remembered tab remains available even when
-it does not match the search. Arrow/Tab navigation cycles from that highlighted
+it does not match the search. Tab/Shift+Tab navigation cycles from that highlighted
 tab. Selecting a workspace restores its remembered tab and pane; selecting a
 tab focuses it explicitly. Up/down clears tab selection and stops at the first
 or last workspace row. `●` marks the active destination; `›` marks selection.
@@ -219,7 +221,8 @@ status refresh; reopen the palette to refresh its commands. GitHub CLI access
 is needed only when selecting the command to resolve the PR URL.
 
 Type or paste to filter, use ↑/↓ or Ctrl+P/N, and press Enter or click a result
-to run it. Cmd+Backspace or Ctrl+U clears the search or name input.
+to run it. Left/right moves the text cursor, and Backspace deletes one character
+before it. Cmd+Backspace or Ctrl+U clears the search or name input.
 Rename commands prefill the existing name and require a nonblank name. New Tab
 and New Workspace first show a selected suggested name; type to replace it, or
 accept the suggestion or a blank field to use automatic naming. Close commands

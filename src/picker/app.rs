@@ -1,3 +1,4 @@
+use crate::search::input::{InputChange, TextInput};
 use ratatui::layout::Rect;
 use terminal_input::event::{
     Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
@@ -27,7 +28,7 @@ pub struct ResultHit {
 
 pub struct App {
     pub snapshot: Snapshot,
-    pub query: String,
+    input: TextInput,
     pub results: Vec<WorkspaceResult>,
     pub selected: Option<usize>,
     pub selected_tab: Option<usize>,
@@ -51,7 +52,7 @@ impl App {
         );
         Self {
             snapshot,
-            query: String::new(),
+            input: TextInput::default(),
             results,
             selected,
             selected_tab: None,
@@ -67,11 +68,25 @@ impl App {
     }
 
     pub fn set_query(&mut self, query: String) {
-        self.query = query;
-        self.results = self.search.results(&self.snapshot, &self.query, self.mode);
+        self.input = TextInput::new(query, false);
+        self.refresh_results();
+    }
+
+    pub fn query(&self) -> &str {
+        self.input.text()
+    }
+
+    pub fn input(&self) -> &TextInput {
+        &self.input
+    }
+
+    fn refresh_results(&mut self) {
+        self.results = self
+            .search
+            .results(&self.snapshot, self.input.text(), self.mode);
         self.selected = (!self.results.is_empty()).then_some(0);
         self.selected_tab = None;
-        if !self.query.trim().is_empty() {
+        if !self.input.text().trim().is_empty() {
             let best = self
                 .results
                 .iter()
@@ -164,6 +179,12 @@ impl App {
             .unwrap_or(Action::Continue)
     }
 
+    fn edit_input(&mut self, event: &Event) {
+        if self.input.handle(event) == InputChange::Edited {
+            self.refresh_results();
+        }
+    }
+
     pub fn handle(&mut self, event: Event) -> Action {
         match event {
             Event::ThemeModeChanged(appearance) => self.theme.set_appearance(appearance),
@@ -201,32 +222,13 @@ impl App {
                         self.navigate_tab(-1)
                     }
                     KeyCode::Tab => self.navigate_tab(1),
-                    KeyCode::Left => self.navigate_tab(-1),
-                    KeyCode::Right => self.navigate_tab(1),
                     KeyCode::Enter => return self.activate(),
-                    _ if crate::search::input::is_clear_shortcut(&key) => {
-                        self.set_query(String::new());
+                    _ => {
+                        self.edit_input(&Event::Key(key));
                     }
-                    KeyCode::Backspace => {
-                        let mut query = self.query.clone();
-                        query.pop();
-                        self.set_query(query);
-                    }
-                    KeyCode::Char(ch)
-                        if !key.modifiers.intersects(
-                            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
-                        ) =>
-                    {
-                        self.set_query(format!("{}{ch}", self.query))
-                    }
-                    _ => {}
                 }
             }
-            Event::Paste(text) => self.set_query(format!(
-                "{}{}",
-                self.query,
-                text.chars().filter(|c| !c.is_control()).collect::<String>()
-            )),
+            event @ Event::Paste(_) => self.edit_input(&event),
             Event::Mouse(mouse) if self.results_area.contains((mouse.column, mouse.row).into()) => {
                 match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => {

@@ -147,7 +147,7 @@ fn status_uses_custom_colors_and_terminal_appearance() {
         light[(hit.x + 3, hit.y)].fg,
         ratatui::style::Color::Rgb(171, 205, 239)
     );
-    assert_eq!(app.query, "codex");
+    assert_eq!(app.query(), "codex");
 }
 
 #[test]

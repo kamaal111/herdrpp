@@ -75,7 +75,7 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 chunks[0],
                 chunks[1],
                 palette,
-                &app.query,
+                app.input(),
                 if app.tasks {
                     "Search tasks"
                 } else {
@@ -180,13 +180,8 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 chunks[4],
             );
         }
-        Mode::Name {
-            item,
-            input,
-            error,
-            selected,
-        } => {
-            view::render_name_input(frame, chunks[0], chunks[1], palette, input, *selected);
+        Mode::Name { item, input, error } => {
+            view::render_name_input(frame, chunks[0], chunks[1], palette, input);
             let message = if *error {
                 "Enter a nonblank name".to_string()
             } else {
