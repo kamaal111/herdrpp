@@ -116,7 +116,9 @@ class PaletteOwnerHarness:
         path = await_file(self.root / "request")
         directory = Path(path.read_text())
         self.master, self.slave = pty.openpty()
-        (directory / "terminal.json").write_text(json.dumps(os.ttyname(self.slave)))
+        terminal = directory / "terminal-pending.json"
+        terminal.write_text(json.dumps(os.ttyname(self.slave)))
+        terminal.replace(directory / "terminal.json")
         if discovery:
             await_file(directory / "catalog.json")
         return directory
