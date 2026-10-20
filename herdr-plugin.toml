@@ -1,6 +1,6 @@
 id = "herdrpp"
 name = "herdr++"
-version = "0.7.0"
+version = "0.8.0"
 min_herdr_version = "0.9.5"
 description = "Search workspaces and tabs, and show GitHub PR and CI status"
 platforms = ["macos", "linux"]

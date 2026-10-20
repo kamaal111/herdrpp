@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0](https://github.com/kamaal111/herdrpp/compare/v0.7.0...v0.8.0) (2026-10-20)
+
+
+### Features
+
+* **tasks:** discover the nearest ancestor task configuration ([158074c](https://github.com/kamaal111/herdrpp/commit/158074ceef8b1efc953da0ecae4679c5a073ac80))
+
+
+### Bug Fixes
+
+* **input:** restore cursor editing across all text fields ([0894914](https://github.com/kamaal111/herdrpp/commit/0894914f78f6ddcd2de17b0fa668b8fcf83447a3))
+* **pr:** show default-branch CI for GitButler workspaces ([977847c](https://github.com/kamaal111/herdrpp/commit/977847c664d97085cf92666264c798a2a489954f))
+
 ## [0.7.0](https://github.com/kamaal111/herdrpp/compare/v0.6.0...v0.7.0) (2026-10-19)
 
 
