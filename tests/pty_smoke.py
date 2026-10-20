@@ -134,10 +134,10 @@ def case(
             os.close(slave)
 
 
-def palette_case(keys, expected, loading=False):
+def palette_case(keys, expected, loading=False, recent_ids=None):
     with tempfile.TemporaryDirectory(prefix="herdrpp-palette-pty-") as directory:
         directory = Path(directory)
-        catalog = dict(context={}, warning=None,
+        catalog = dict(context={}, warning=None, recent_ids=recent_ids or [],
                        naming=dict(workspace_name="Project", tab_name="Codex", pane_name="",
                                    tab_auto_named=True, workspace_cwd=None,
                                    workspace_suggestion="workspace", tab_suggestion="3"),
@@ -183,6 +183,8 @@ def palette_case(keys, expected, loading=False):
 
 
 def main():
+    palette_case(b"\rReview\r", dict(id="herdr:tab_create", input="Review", confirmed=False), recent_ids=["herdr:tab_create"])
+    palette_case(b"split\x15\rReview\r", dict(id="herdr:tab_create", input="Review", confirmed=False), recent_ids=["herdr:tab_create"])
     palette_case(b"spl rgt\r", dict(id="herdr:split_right", input=None, confirmed=False))
     palette_case(b"unmatched\x15spl rgt\r", dict(id="herdr:split_right", input=None, confirmed=False))
     palette_case(b"unmatched\x1b[117;5uspl rgt\r", dict(id="herdr:split_right", input=None, confirmed=False))

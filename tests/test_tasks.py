@@ -351,3 +351,38 @@ class TestTaskOwner(TaskOwnerHarness):
         self.save_snapshot()
         assert self.launch() != first
         assert len([r for r in self.requests if r["method"] == "tab.create"]) == 2
+
+    def test_successful_tasks_keep_recent_order_after_reordering_and_isolate_checkouts(self):
+        self.task_file.write_text('[{"label":"build","command":"true"},{"label":"dev","command":"true"},{"label":"test","command":"true"}]')
+        directory = self.start()
+        self.select(directory, {"id":"task:2", "input":None, "confirmed":False})
+        (self.root / "request").unlink()
+        directory = self.start()
+        assert json.loads((directory / "catalog.json").read_text())["recent_ids"] == ["task:2"]
+        self.select(directory, {"id":"task:1", "input":None, "confirmed":False})
+        self.task_file.write_text('[{"label":"dev","command":"echo changed"},{"label":"test","command":"true"},{"label":"build","command":"true"}]')
+        (self.root / "request").unlink()
+        directory = self.start()
+        assert json.loads((directory / "catalog.json").read_text())["recent_ids"] == ["task:0", "task:1"]
+        self.select(directory, None)
+        other = self.root / "another-checkout"
+        (other / ".herdr").mkdir(parents=True)
+        (other / ".herdr/tasks.json").write_bytes(self.task_file.read_bytes())
+        self.snapshot["workspaces"][0]["worktree"]["checkout_path"] = str(other)
+        self.save_snapshot()
+        (self.root / "request").unlink()
+        directory = self.start()
+        assert json.loads((directory / "catalog.json").read_text())["recent_ids"] == []
+        self.select(directory, None)
+
+    def test_task_launch_failure_preserves_previous_history(self):
+        pane = self.launch()
+        history = self.root / "plugin-state/palette-history.json"
+        before = history.read_bytes()
+        self.busy.add(pane)
+        self.interrupt_stops = False
+        (self.root / "request").unlink()
+        directory = self.start()
+        stderr = self.finish_error(directory)
+        assert "did not become idle" in stderr
+        assert history.read_bytes() == before

@@ -68,6 +68,7 @@ class PaletteOwnerHarness:
         fake.chmod(0o700)
         self.env = dict(os.environ, HERDR_BIN_PATH=str(fake),
                         PALETTE_TEST_ROOT=str(tmp_path),
+                        HERDR_PLUGIN_STATE_DIR=str(tmp_path / "plugin-state"),
                         HERDR_SOCKET_PATH=str(tmp_path / "unused.sock"),
                         HERDR_PLUGIN_CONTEXT_JSON=json.dumps({"workspace_id":"w2", "tab_id":"w2:t7", "focused_pane_id":"w2:p8"}))
         self.process = None
@@ -217,6 +218,47 @@ class TestPaletteOwner(PaletteOwnerHarness):
         stdout, stderr = self.process.communicate(timeout=8)
         assert self.process.returncode == 1, (stdout, stderr)
         assert "original tab is no longer available" in stderr
+        assert not (self.root / "plugin-state/palette-history.json").exists()
+
+    def test_successful_commands_persist_recent_order_across_owner_processes(self):
+        directory = self.start()
+        self.select(directory, {"id":"herdr:search_workspaces", "input":None, "confirmed":False})
+        (self.root / "request").unlink()
+        directory = self.start()
+        assert json.loads((directory / "catalog.json").read_text())["recent_ids"] == ["herdr:search_workspaces"]
+        self.select(directory, {"id":"herdr:zoom", "input":None, "confirmed":False})
+        (self.root / "request").unlink()
+        self.env["HERDR_PLUGIN_CONTEXT_JSON"] = json.dumps({"workspace_id":"w3", "tab_id":"w3:t1", "focused_pane_id":"w3:p1"})
+        (self.root / "snapshot.json").write_text(json.dumps({
+            "workspaces":[{"workspace_id":"w3"}],
+            "tabs":[{"tab_id":"w3:t1", "workspace_id":"w3"}],
+            "panes":[{"pane_id":"w3:p1", "workspace_id":"w3", "tab_id":"w3:t1"}],
+        }))
+        directory = self.start()
+        assert json.loads((directory / "catalog.json").read_text())["recent_ids"] == ["herdr:zoom", "herdr:search_workspaces"]
+        self.select(directory, None)
+
+    def test_cancelling_does_not_record_usage(self):
+        directory = self.start()
+        self.select(directory, None)
+        assert not (self.root / "plugin-state/palette-history.json").exists()
+
+    def test_history_failure_does_not_block_successful_command(self):
+        state = self.root / "plugin-state"
+        state.write_text("occupied")
+        directory = self.start()
+        assert json.loads((directory / "catalog.json").read_text())["recent_ids"] == []
+        calls = self.select(directory, {"id":"herdr:zoom", "input":None, "confirmed":False})
+        assert ["pane", "zoom", "--pane", "w2:p8", "--toggle"] in calls
+
+    def test_malformed_history_falls_back_and_successful_launch_repairs_it(self):
+        state = self.root / "plugin-state"
+        state.mkdir()
+        (state / "palette-history.json").write_text("broken")
+        directory = self.start()
+        assert json.loads((directory / "catalog.json").read_text())["recent_ids"] == []
+        self.select(directory, {"id":"herdr:zoom", "input":None, "confirmed":False})
+        assert json.loads((state / "palette-history.json").read_text()) == [{"Command":"herdr:zoom"}]
 
 
 PR_FAKE = r'''#!/usr/bin/env python3

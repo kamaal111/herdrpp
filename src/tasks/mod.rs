@@ -137,6 +137,7 @@ pub fn load(api: &Herdr, context: &Context) -> Catalog {
         Err(error) => (vec![], Some(format!("Cannot load tasks\n\n{error:#}"))),
     };
     Catalog {
+        recent_ids: vec![],
         context: context.clone(),
         naming: crate::palette::naming::Naming::default(),
         items,
