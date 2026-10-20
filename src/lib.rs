@@ -10,3 +10,5 @@ pub mod palette;
 pub mod search;
 
 pub mod tasks;
+
+pub mod repository;

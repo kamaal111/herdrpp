@@ -5,4 +5,5 @@ pub mod cli;
 pub mod history;
 pub mod naming;
 pub mod pull_request;
+pub mod repository;
 pub mod ui;

@@ -200,3 +200,21 @@ fn empty_queries_use_recent_items_then_original_order_and_search_is_unchanged() 
         );
     }
 }
+
+#[test]
+fn repository_directory_uses_opening_workspace_and_rejects_relative_paths() {
+    let mut snapshot = pr_snapshot(json!(null));
+    assert_eq!(
+        herdrpp::palette::repository::directory_from_snapshot(&snapshot, &context()),
+        Some("/projects/herdrpp".into())
+    );
+    snapshot["workspaces"][1]["worktree"]["checkout_path"] = json!("relative");
+    assert_eq!(
+        herdrpp::palette::repository::directory_from_snapshot(&snapshot, &context()),
+        None
+    );
+    assert_eq!(
+        herdrpp::palette::repository::directory_from_snapshot(&snapshot, &Context::default()),
+        None
+    );
+}

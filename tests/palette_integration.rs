@@ -288,3 +288,48 @@ fn view_pull_request_selection_requires_no_input_or_confirmation() {
     );
     assert!(api::arguments(&command, &context()).unwrap().is_none());
 }
+
+#[test]
+fn open_repo_selection_requires_no_input_or_confirmation() {
+    let command = Command::OpenRepo {
+        url: "https://github.com/kamaal111/herdrpp".into(),
+    };
+    let items = vec![catalog::Item {
+        id: "herdr:open_repo".into(),
+        title: "Open Repo".into(),
+        source: "Herdr".into(),
+        description: String::new(),
+        command: command.clone(),
+    }];
+    let selection = Selection {
+        id: "herdr:open_repo".into(),
+        input: None,
+        confirmed: false,
+    };
+    assert_eq!(
+        cli::validate_selection(&items, &selection).unwrap(),
+        &command
+    );
+    assert!(
+        cli::validate_selection(
+            &items,
+            &Selection {
+                input: Some("123".into()),
+                id: selection.id.clone(),
+                confirmed: false,
+            }
+        )
+        .is_err()
+    );
+    assert!(
+        cli::validate_selection(
+            &items,
+            &Selection {
+                confirmed: true,
+                ..selection
+            }
+        )
+        .is_err()
+    );
+    assert!(api::arguments(&command, &context()).unwrap().is_none());
+}
