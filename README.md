@@ -255,7 +255,7 @@ validation, and test recipes. Select `just: format-check` for a quick run in
 an idle pane of the opening tab, or `just: build` to try a reusable task tab.
 The focus and snapshot tasks require Docker; the test and ready tasks require uv.
 
-Create `.herdr/tasks.json` at the workspace's checkout root:
+Create `.herdr/tasks.json` at the workspace's checkout root or in a parent folder:
 
 ```json
 [
@@ -305,7 +305,14 @@ identity. Detached background processes are outside restart management.
 
 Checkout discovery prefers workspace worktree metadata, otherwise the Git root
 of the opening pane's foreground or original directory. A resolvable Git
-checkout is required; tasks are not inherited from ancestor configurations.
+checkout is required. Task discovery checks `.herdr/tasks.json` in that checkout,
+then in each parent folder up to 10 levels above it, stopping at the filesystem
+root. The nearest file wins; configurations are not merged. An empty or invalid
+nearest file shows its empty state or diagnostics without falling back farther.
+For example, `/projects/.herdr/tasks.json` can share tasks across checkouts at
+`/projects/api` and `/projects/web`. Commands still run from the active checkout,
+so those shared tasks run in `/projects/api` or `/projects/web`, respectively.
+Linked worktrees search their own physical ancestors, not the original checkout.
 
 Setup migration 3 adds the available Cmd+Shift+R binding on the next installer
 run. Existing bindings are preserved; conflicts are reported for manual setup.
