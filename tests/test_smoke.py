@@ -942,6 +942,77 @@ class TestPluginSmoke:
                 for index, contexts in enumerate(checks, 1)]}}}}}})
 
     @pytest.mark.parametrize("branch", ["main", "master", "trunk"])
+    @pytest.mark.parametrize("state,expected", [
+        ("SUCCESS", "ci_passed=CI ✅"),
+        ("FAILURE", "ci_failed=CI ❌"),
+        ("PENDING", "ci_pending=CI 🟡"),
+    ])
+    def test_gitbutler_workspace_uses_default_branch_ci(self, branch, state, expected):
+        self.set_default_branch(branch)
+        self.git("branch", "-m", "gitbutler/workspace")
+        self.write("prs.json", [pr(321, branch="gitbutler/workspace")])
+        self.set_history([[{"__typename": "StatusContext", "state": state}]])
+        self.run_plugin("refresh")
+        report = self.reports()[0]
+        assert expected in report
+        assert all(token in report for token in ("pr_number", "pr_open", "pr_draft", "pr_merged", "pr_closed"))
+        assert "pr_number=#321" not in report
+        queries = [args for kind, args in self.calls() if kind == "gh" and args[:2] == ["api", "graphql"]]
+        assert len(queries) == 1
+        assert f"branch=refs/heads/{branch}" in queries[0]
+        assert [args for kind, args in self.calls() if kind == "gh" and "state=all" in args] == []
+
+    def test_gitbutler_workspace_overrides_tracking_branch(self):
+        self.set_default_branch()
+        self.git("branch", "-m", "gitbutler/workspace")
+        self.git("config", "branch.gitbutler/workspace.remote", "company")
+        self.git("config", "branch.gitbutler/workspace.merge", "refs/heads/feature")
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        self.run_plugin("refresh")
+        assert "ci_passed=CI ✅" in self.reports()[0]
+        queries = [args for kind, args in self.calls() if kind == "gh" and args[:2] == ["api", "graphql"]]
+        assert len(queries) == 1
+        assert "branch=refs/heads/trunk" in queries[0]
+
+    def test_gitbutler_workspace_check_pr(self):
+        self.set_default_branch()
+        self.git("branch", "-m", "gitbutler/workspace")
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        assert self.run_plugin("check-pr").stdout == "w1: CI ✅\n"
+        assert not (self.root / "reports").exists()
+        assert not (self.root / "state").exists()
+
+    def test_gitbutler_workspace_ci_failure(self):
+        self.set_default_branch()
+        self.git("branch", "-m", "gitbutler/workspace")
+        (self.root / "ci-fail").touch()
+        assert self.run_plugin("refresh", check=False).returncode != 0
+        report = self.reports()[0]
+        assert "pr_number" in report
+        assert "ci_passed" not in report
+        assert "ci_failed" not in report
+        assert "ci_pending" not in report
+        assert "--ttl-ms" not in report
+        assert [args for kind, args in self.calls() if kind == "gh" and "state=all" in args] == []
+
+    def test_gitbutler_workspace_branch_change_discards_status(self):
+        self.set_default_branch()
+        self.git("branch", "-m", "gitbutler/workspace")
+        self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])
+        (self.root / "branch-switch").touch()
+        self.run_plugin("refresh")
+        assert "ci_passed=CI ✅" not in self.reports()[0]
+        assert "ci_passed" in self.reports()[0]
+
+    def test_other_gitbutler_branch_keeps_pr_lookup(self):
+        self.set_default_branch()
+        self.git("branch", "-m", "gitbutler/feature")
+        self.write("prs.json", [pr(321, branch="gitbutler/feature")])
+        self.run_plugin("refresh")
+        assert "pr_number=#321" in self.reports()[0]
+        assert [args for kind, args in self.calls() if kind == "gh" and args[:2] == ["api", "graphql"]] == []
+
+    @pytest.mark.parametrize("branch", ["main", "master", "trunk"])
     def test_default_branch_shows_ci_and_never_queries_historical_pr(self, branch):
         self.set_default_branch(branch)
         self.set_history([[{"__typename": "StatusContext", "state": "SUCCESS"}]])

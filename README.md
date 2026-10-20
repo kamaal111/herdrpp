@@ -320,6 +320,8 @@ On the repository's default branch, the sidebar shows `CI ✅`, `CI ❌`, or
 remotes take priority, followed by a sole eligible remote, then GitHub CLI's
 selected repository when several exist. No branch or remote name is assumed.
 A local branch tracking the default branch also receives this CI display.
+When `gitbutler/workspace` is checked out, it also shows the repository's
+default-branch CI, regardless of which branch it tracks.
 
 CI uses the remote default branch's latest 10 commits, independent of the local
 checkout's commit. The newest commit with running or actionable completed
