@@ -16,6 +16,7 @@ fn main() -> Result<()> {
     };
     let mut app = App::new(
         Snapshot {
+            agents: vec![],
             workspaces: vec![],
             tabs: vec![],
             focused_workspace_id: None,
@@ -25,7 +26,22 @@ fn main() -> Result<()> {
     );
     app.theme = Theme::parse("[theme]\nname = 'dracula'\n")?;
     if case.starts_with("agent-status-") {
+        let agents: Vec<_> = [
+            ("w1", "w1:t1", "working"),
+            ("w1", "w1:t1", "blocked"),
+            ("w1", "w1:t1", "done"),
+            ("w1", "w1:t1", "working"),
+            ("w2", "w2:t1", "done"),
+            ("w2", "w2:t1", "idle"),
+        ]
+        .into_iter()
+        .chain(std::iter::repeat_n(("w2", "w2:t2", "idle"), 40))
+        .map(|(workspace, tab, status)| {
+            json!({"workspace_id":workspace,"tab_id":tab,"agent_status":status})
+        })
+        .collect();
         let mut snapshot: Snapshot = serde_json::from_value(json!({
+            "agents": agents,
             "workspaces": [
                 {"workspace_id":"w1","number":1,"label":"herdrpp","active_tab_id":"w1:t1"},
                 {"workspace_id":"w2","number":2,"label":"feature/status","active_tab_id":"w2:t1","worktree":{"repo_key":"herdrpp","is_linked_worktree":true}},

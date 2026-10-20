@@ -193,8 +193,24 @@ fn row_line(
     Line::from(spans).style(style)
 }
 
+const MAX_AGENT_STATUS_ICONS: usize = 4;
+
+fn agent_indicator_width(visible: usize, hidden: usize) -> usize {
+    2 * visible
+        + if hidden > 0 {
+            format!("+{hidden} ").width()
+        } else {
+            0
+        }
+}
+
 fn tab_width(row: &Row) -> usize {
-    row.label.width() + 4 + 2 * usize::from(row.active)
+    let count = row.agent_statuses.len();
+    let visible = count.min(MAX_AGENT_STATUS_ICONS);
+    row.label.width()
+        + 2
+        + agent_indicator_width(visible, count - visible)
+        + 2 * usize::from(row.active)
 }
 
 fn tab_window(tabs: &[Row], selected: Option<usize>, width: usize) -> (usize, Vec<(usize, usize)>) {
@@ -230,26 +246,69 @@ fn tab_window(tabs: &[Row], selected: Option<usize>, width: usize) -> (usize, Ve
     (start, visible)
 }
 
+fn tab_prefix(row: &Row, width: usize, theme: &Theme) -> (Vec<Span<'static>>, usize) {
+    let mut spans = Vec::new();
+    let count = row.agent_statuses.len();
+    let limit = count.min(MAX_AGENT_STATUS_ICONS);
+    let preferred_width = agent_indicator_width(limit, count - limit);
+    let (visible, hidden, active) = if width > preferred_width {
+        (
+            limit,
+            count - limit,
+            row.active && width > preferred_width + 2,
+        )
+    } else if count > 1 {
+        let visible = (0..limit)
+            .rev()
+            .find(|visible| agent_indicator_width(*visible, count - visible) < width);
+        match visible {
+            Some(visible) => (visible, count - visible, false),
+            None => {
+                let summary = format!("+{count}");
+                if summary.width() <= width {
+                    spans.push(Span::styled(
+                        summary,
+                        ratatui::style::Style::default().fg(theme.palette().overlay1),
+                    ));
+                    return (spans, 0);
+                }
+                return (spans, width);
+            }
+        }
+    } else {
+        (0, 0, false)
+    };
+    if active {
+        spans.push(Span::raw("● "));
+    }
+    for status in row.agent_statuses.iter().take(visible) {
+        let (icon, color) = theme.status_indicator(*status);
+        spans.push(Span::styled(
+            format!("{icon} "),
+            ratatui::style::Style::default().fg(color),
+        ));
+    }
+    if hidden > 0 {
+        spans.push(Span::styled(
+            format!("+{hidden} "),
+            ratatui::style::Style::default().fg(theme.palette().overlay1),
+        ));
+    }
+    let used: usize = spans.iter().map(|span| span.content.width()).sum();
+    (spans, width - used)
+}
+
 fn tab_line(row: &Row, width: usize, selected: bool, theme: &Theme) -> Line<'static> {
     let palette = theme.palette();
-    let (icon, color) = theme.status_indicator(row.agent_status);
+    let (_, color) = theme.status_indicator(row.agent_status);
     let mut spans = Vec::new();
     let label_width = if width < 3 {
         width
     } else {
         spans.push(Span::raw("["));
-        let status = width >= 5;
-        let active = row.active && width >= 7;
-        if active {
-            spans.push(Span::raw("● "));
-        }
-        if status {
-            spans.push(Span::styled(
-                format!("{icon} "),
-                ratatui::style::Style::default().fg(color),
-            ));
-        }
-        width - 2 - 2 * usize::from(active) - 2 * usize::from(status)
+        let (prefix, label_width) = tab_prefix(row, width - 2, theme);
+        spans.extend(prefix);
+        label_width
     };
     spans.extend(
         label_spans(&row.label, &row.label_matches, label_width)

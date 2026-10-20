@@ -33,13 +33,24 @@ pub struct Row {
     pub matches_query: bool,
     pub active: bool,
     pub agent_status: AgentStatus,
+    pub agent_statuses: Vec<AgentStatus>,
 }
 
 impl Row {
     fn tab(snapshot: &Snapshot, tab: &Tab, ancestors: Vec<Ancestor>) -> Self {
+        let mut agent_statuses: Vec<_> = snapshot
+            .agents
+            .iter()
+            .filter(|agent| agent.workspace_id == tab.workspace_id && agent.tab_id == tab.tab_id)
+            .map(|agent| agent.agent_status)
+            .collect();
+        if agent_statuses.is_empty() {
+            agent_statuses.push(tab.agent_status);
+        }
         Self {
             kind: RowKind::Tab,
             agent_status: tab.agent_status,
+            agent_statuses,
             target: Target::Tab(tab.tab_id.clone()),
             workspace_id: tab.workspace_id.clone(),
             label: tab.label.clone(),
@@ -171,6 +182,7 @@ impl Search {
         let mut row = Row {
             kind,
             agent_status: AgentStatus::Unknown,
+            agent_statuses: Vec::new(),
             target: Target::Workspace(workspace.workspace_id.clone()),
             workspace_id: workspace.workspace_id.clone(),
             label: workspace.label.clone(),
