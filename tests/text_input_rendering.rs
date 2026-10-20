@@ -131,3 +131,22 @@ fn name_input_renders_selected_suggestion_and_cursor_from_shared_model() {
             .contains(Modifier::REVERSED)
     );
 }
+
+#[test]
+fn command_arrows_scroll_long_input_to_each_edge() {
+    let mut input = TextInput::new("abcdefghijklmnop".into(), false);
+    input.handle(&Event::Key(KeyEvent::new(
+        KeyCode::Left,
+        KeyModifiers::SUPER,
+    )));
+    let (terminal, cursor) = draw(&input, 20);
+    assert!(row(&terminal).starts_with("> abcdefg"));
+    assert_eq!(cursor, Position::new(2, 0));
+    input.handle(&Event::Key(KeyEvent::new(
+        KeyCode::Right,
+        KeyModifiers::SUPER,
+    )));
+    let (terminal, cursor) = draw(&input, 20);
+    assert!(row(&terminal).starts_with("> klmnop "));
+    assert_eq!(cursor, Position::new(8, 0));
+}

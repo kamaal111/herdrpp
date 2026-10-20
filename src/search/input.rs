@@ -60,8 +60,13 @@ impl TextInput {
                     self.clear();
                     InputChange::Edited
                 }
-                KeyCode::Left => {
-                    self.cursor = if self.selected {
+                KeyCode::Left | KeyCode::Char('a')
+                    if key.code == KeyCode::Left || key.modifiers == KeyModifiers::CONTROL =>
+                {
+                    self.cursor = if self.selected
+                        || key.modifiers.contains(KeyModifiers::SUPER)
+                        || key.code == KeyCode::Char('a')
+                    {
                         0
                     } else {
                         self.text[..self.cursor]
@@ -72,8 +77,13 @@ impl TextInput {
                     self.selected = false;
                     InputChange::Cursor
                 }
-                KeyCode::Right => {
-                    self.cursor = if self.selected {
+                KeyCode::Right | KeyCode::Char('e')
+                    if key.code == KeyCode::Right || key.modifiers == KeyModifiers::CONTROL =>
+                {
+                    self.cursor = if self.selected
+                        || key.modifiers.contains(KeyModifiers::SUPER)
+                        || key.code == KeyCode::Char('e')
+                    {
                         self.text.len()
                     } else {
                         self.cursor

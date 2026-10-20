@@ -124,12 +124,16 @@ fn releases_and_modified_characters_do_not_edit_or_move_cursor() {
         KeyCode::Right,
         KeyCode::Backspace,
         KeyCode::Char('u'),
+        KeyCode::Char('a'),
+        KeyCode::Char('e'),
     ] {
-        let mut input = TextInput::new("abc".into(), true);
-        let mut release = KeyEvent::new(code, KeyModifiers::SUPER);
-        release.kind = KeyEventKind::Release;
-        assert_eq!(input.handle(&Event::Key(release)), InputChange::Unhandled);
-        assert_eq!(input, TextInput::new("abc".into(), true));
+        for modifiers in [KeyModifiers::SUPER, KeyModifiers::CONTROL] {
+            let mut input = TextInput::new("abc".into(), true);
+            let mut release = KeyEvent::new(code, modifiers);
+            release.kind = KeyEventKind::Release;
+            assert_eq!(input.handle(&Event::Key(release)), InputChange::Unhandled);
+            assert_eq!(input, TextInput::new("abc".into(), true));
+        }
     }
     for modifiers in [
         KeyModifiers::CONTROL,
@@ -150,5 +154,65 @@ fn repeats_move_once_and_plain_u_types() {
     input.handle(&Event::Key(repeat));
     input.handle(&key(KeyCode::Char('u')));
     assert_eq!(input.text(), "abuc");
+    assert_eq!(input.cursor(), 3);
+}
+
+#[test]
+fn command_arrows_jump_to_text_edges() {
+    for (text, lefts) in [("abcd", 2), ("a界🙂", 2), ("", 0)] {
+        for (code, expected) in [(KeyCode::Left, 0), (KeyCode::Right, text.len())] {
+            let mut input = TextInput::new(text.into(), false);
+            for _ in 0..lefts {
+                input.handle(&key(KeyCode::Left));
+            }
+            for kind in [KeyEventKind::Press, KeyEventKind::Repeat] {
+                let mut event = KeyEvent::new(code, KeyModifiers::SUPER);
+                event.kind = kind;
+                assert_eq!(input.handle(&Event::Key(event)), InputChange::Cursor);
+                assert_eq!(input.cursor(), expected);
+                assert_eq!(input.text(), text);
+                assert!(!input.selected());
+            }
+        }
+    }
+}
+
+#[test]
+fn command_arrows_collapse_selected_suggestions_to_each_edge() {
+    for (code, expected) in [(KeyCode::Left, 0), (KeyCode::Right, 6)] {
+        let mut input = TextInput::new("Review".into(), true);
+        assert_eq!(
+            input.handle(&Event::Key(KeyEvent::new(code, KeyModifiers::SUPER))),
+            InputChange::Cursor
+        );
+        assert_eq!(input.text(), "Review");
+        assert_eq!(input.cursor(), expected);
+        assert!(!input.selected());
+    }
+}
+
+#[test]
+fn ghostty_command_arrows_move_to_edges_without_editing_text() {
+    for (code, cursor) in [(KeyCode::Char('a'), 0), (KeyCode::Char('e'), 8)] {
+        for selected in [false, true] {
+            let mut input = TextInput::new("a界🙂".into(), selected);
+            assert_eq!(
+                input.handle(&Event::Key(KeyEvent::new(code, KeyModifiers::CONTROL))),
+                InputChange::Cursor
+            );
+            assert_eq!(input.text(), "a界🙂");
+            assert_eq!(input.cursor(), cursor);
+            assert!(!input.selected());
+        }
+    }
+}
+
+#[test]
+fn plain_a_and_e_still_insert_at_the_cursor() {
+    let mut input = TextInput::new("xy".into(), false);
+    input.handle(&key(KeyCode::Left));
+    assert_eq!(input.handle(&key(KeyCode::Char('a'))), InputChange::Edited);
+    assert_eq!(input.handle(&key(KeyCode::Char('e'))), InputChange::Edited);
+    assert_eq!(input.text(), "xaey");
     assert_eq!(input.cursor(), 3);
 }
