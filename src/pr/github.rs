@@ -278,10 +278,31 @@ impl PrState {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PrDetails {
+    #[serde(flatten)]
+    metadata: PrMetadata,
+    commits: PrCommits,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrMetadata {
     number: u64,
     state: PrState,
     is_draft: bool,
-    commits: PrCommits,
+}
+
+impl PrMetadata {
+    fn summary(self, expected_number: u64, ci: Option<CiStatus>) -> Result<PrSummary> {
+        ensure!(
+            self.number > 0 && self.number == expected_number,
+            "GitHub PR details number mismatch"
+        );
+        Ok(PrSummary {
+            number: self.number,
+            lifecycle: self.state.lifecycle(self.is_draft),
+            ci,
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -384,11 +405,6 @@ pub fn parse_summary(bytes: &[u8], expected_number: u64) -> Result<PrSummary> {
 
 fn summarize_pr(details: PrDetails, expected_number: u64) -> Result<PrSummary> {
     ensure!(
-        details.number > 0 && details.number == expected_number,
-        "GitHub PR details number mismatch"
-    );
-    let lifecycle = details.state.lifecycle(details.is_draft);
-    ensure!(
         details.commits.nodes.len() == 1,
         "GitHub PR has no unique head commit"
     );
@@ -401,11 +417,7 @@ fn summarize_pr(details: PrDetails, expected_number: u64) -> Result<PrSummary> {
             .context("GitHub PR has no head commit")?
             .commit,
     )?;
-    Ok(PrSummary {
-        number: details.number,
-        lifecycle,
-        ci,
-    })
+    details.metadata.summary(expected_number, ci)
 }
 
 fn aggregate_checks(checks: Vec<Check>) -> Result<(Option<CiStatus>, bool)> {
@@ -620,6 +632,14 @@ struct HistoryRepository {
     branch: HistoryRef,
 }
 
+impl HistoryRepository {
+    fn commits(self) -> Result<Vec<CiCommit>> {
+        let commits = self.branch.target.history.nodes;
+        ensure!(commits.len() <= 10, "GitHub CI history exceeds 10 commits");
+        Ok(commits)
+    }
+}
+
 #[derive(Deserialize)]
 struct HistoryRef {
     target: HistoryTarget,
@@ -674,9 +694,7 @@ struct ContextRepository {
 
 fn ci_history(bytes: &[u8]) -> Result<Vec<CiCommit>> {
     let data: HistoryData = graphql_data(bytes)?;
-    let commits = data.repository.branch.target.history.nodes;
-    ensure!(commits.len() <= 10, "GitHub CI history exceeds 10 commits");
-    Ok(commits)
+    data.repository.commits()
 }
 
 fn commit_ci(commit: CiCommit) -> Result<(Option<CiStatus>, bool)> {

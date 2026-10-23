@@ -11,10 +11,12 @@ import tempfile
 import time
 import pytest
 
+from fake_github_graphql import history_for_pr
+
 
 FAKE = r"""#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time
-from fake_github_graphql import status_response
+from fake_github_graphql import history_for_pr, status_response
 root = pathlib.Path(os.environ["PR_TEST_ROOT"])
 args = sys.argv[1:]
 kind = pathlib.Path(sys.argv[0]).name
@@ -61,7 +63,10 @@ else:
             if (root / "pr-response.json").exists():
                 response = json.loads((root / "pr-response.json").read_text())
                 if isinstance(response.get("data"), dict):
-                    response["data"] = {"target0": response["data"].get("repository")}
+                    repository = response["data"].get("repository")
+                    response["data"] = {"target0": repository}
+                    if isinstance(repository, dict) and isinstance(repository.get("pullRequest"), dict):
+                        response["data"]["ci0"] = history_for_pr(repository["pullRequest"])
                 print(json.dumps(response))
                 sys.exit(0)
             def details(number):
@@ -70,7 +75,8 @@ else:
                 selected = next(pr for pr in json.loads((root / "prs.json").read_text()) if pr["number"] == number)
                 return {"number": number, "state": selected["state"].upper(), "isDraft": False, "statusCheckRollup": []}
             history = json.loads((root / "history.json").read_text()) if (root / "history.json").exists() else None
-            print(json.dumps(status_response(args, details, history)))
+            branch_history = json.loads((root / "branch-history.json").read_text()) if (root / "branch-history.json").exists() else None
+            print(json.dumps(status_response(args, details, history, branch_history)))
         else:
             print((root / "contexts.json").read_text())
     elif args[0] == "api":
@@ -394,8 +400,11 @@ class TestPluginSmoke:
         assert "oid=" + "a" * 40 in queries[1]
         assert "owner0=upstream" in queries[0]
         assert "name0=project" in queries[0]
-        assert "owner=upstream" in queries[1]
-        assert "name=project" in queries[1]
+        assert "ciOwner0=alice" in queries[0]
+        assert "ciName0=fork" in queries[0]
+        assert "branch0=refs/heads/feature" in queries[0]
+        assert "owner=alice" in queries[1]
+        assert "name=fork" in queries[1]
         assert all(args[args.index("--hostname") + 1] == "github.example" for args in queries)
 
     @pytest.mark.parametrize("response", [
@@ -410,7 +419,54 @@ class TestPluginSmoke:
         assert self.run_plugin("refresh", check=False).returncode != 0
         assert len(self.reports()) == 1
 
-    def test_pr_head_without_checks_does_not_use_previous_commit(self):
+    @pytest.mark.parametrize("host", ["github.com", "github.example"])
+    @pytest.mark.parametrize("head_checks", [[], [{"__typename": "CheckRun", "status": "QUEUED", "conclusion": None}]])
+    @pytest.mark.parametrize("state,icon", [("SUCCESS", "✅"), ("FAILURE", "❌"), ("PENDING", "🟡")])
+    def test_pr_uses_same_remote_branch_history_as_default_branch(self, host, head_checks, state, icon):
+        self.git("remote", "set-url", "origin", f"git@{host}:alice/project.git")
+        self.write("repository.json", {"nameWithOwner": "alice/project",
+            "url": f"https://{host}/alice/project", "defaultBranchRef": {"name": "main"}})
+        linked = self.root / "linked"
+        self.git("worktree", "add", "-q", "-b", "task/worktree", str(linked))
+        self.set_workspaces([self.workspace("w1", linked)])
+        self.write("prs.json", [pr(123, branch="task/worktree")])
+        self.write("details.json", {"number": 123, "state": "OPEN", "isDraft": False,
+            "statusCheckRollup": head_checks})
+        self.set_history([head_checks, [{"__typename": "StatusContext", "state": state}]])
+        self.write("branch-history.json", json.loads((self.root / "history.json").read_text()))
+        self.run_plugin("refresh")
+        assert f"pr_open=#123 {icon}" in self.reports()[0]
+        query = self.status_queries()[0]
+        assert "branch0=refs/heads/task/worktree" in query
+        assert "history(first:10)" in next(arg for arg in query if arg.startswith("query="))
+
+    @pytest.mark.parametrize("state,icon", [("SUCCESS", "✅"), ("FAILURE", "❌"), ("PENDING", "🟡")])
+    def test_deleted_pr_branch_uses_pr_commit_checks(self, state, icon):
+        self.write("details.json", {"number": 123, "state": "CLOSED", "isDraft": False,
+            "statusCheckRollup": [{"__typename": "StatusContext", "state": state}]})
+        self.write("branch-history.json", {"data": {"repository": {"ref": None}}})
+        self.run_plugin("refresh")
+        assert f"pr_closed=#123 {icon}" in self.reports()[0]
+
+    def test_existing_branch_without_history_does_not_fall_back_to_pr_checks(self):
+        self.write("details.json", {"number": 123, "state": "OPEN", "isDraft": False,
+            "statusCheckRollup": [{"__typename": "StatusContext", "state": "SUCCESS"}]})
+        self.set_history([])
+        self.write("branch-history.json", json.loads((self.root / "history.json").read_text()))
+        self.run_plugin("refresh")
+        assert "pr_open=#123" in self.reports()[0]
+        assert "pr_open=#123 ✅" not in self.reports()[0]
+
+    def test_branch_history_error_does_not_fall_back_to_pr_checks(self):
+        self.run_plugin("refresh")
+        self.write("batch.json", {"data": {"target0": self.pr_status(123), "ci0": None},
+            "errors": [{"message": "history unavailable", "path": ["ci0", "ref"]}]})
+        result = self.run_plugin("refresh", check=False)
+        assert result.returncode != 0
+        assert "history unavailable" in result.stderr
+        assert len(self.reports()) == 1
+
+    def test_pr_branch_without_actionable_history_has_no_ci_icon(self):
         self.set_pr_response([])
         self.run_plugin("refresh")
         assert "pr_open=#123" in self.reports()[0]
@@ -1065,7 +1121,7 @@ class TestPluginSmoke:
         self.run_plugin("refresh")
         assert "pr_number=#321" in self.reports()[0]
         assert "pr0=321" in self.status_queries()[0]
-        assert not any(arg.startswith("branch0=") for arg in self.status_queries()[0])
+        assert "branch0=refs/heads/gitbutler/feature" in self.status_queries()[0]
 
     @pytest.mark.parametrize("branch", ["main", "master", "trunk"])
     def test_default_branch_shows_ci_and_never_queries_historical_pr(self, branch):
@@ -1314,10 +1370,12 @@ class TestPluginSmoke:
         assert len(self.reports()) == 2
 
     @pytest.mark.parametrize("failed_exit", [False, True])
-    def test_partial_batch_error_preserves_failed_target_and_reports_success(self, failed_exit):
+    @pytest.mark.parametrize("failed_alias", ["target0", "ci0"])
+    def test_partial_batch_error_preserves_failed_target_and_reports_success(self, failed_exit, failed_alias):
         self.prepare_branches(2)
-        self.write("batch.json", {"data": {"target0": None, "target1": self.pr_status(124)},
-            "errors": [{"message": "unavailable", "path": ["target0", "pullRequest"]}]})
+        self.write("batch.json", {"data": {"target0": self.pr_status(123), "ci0": None,
+            "target1": self.pr_status(124), "ci1": history_for_pr(self.pr_status(124)["pullRequest"])},
+            "errors": [{"message": "unavailable", "path": [failed_alias]}]})
         (self.root / "batch-exit-fail").write_text(str(failed_exit))
         result = self.run_plugin("refresh", check=False)
         assert result.returncode != 0
@@ -1343,7 +1401,7 @@ class TestPluginSmoke:
             "nodes": [{"__typename": "StatusContext", "state": "SUCCESS"}],
             "pageInfo": {"hasNextPage": True, "endCursor": "page-1"},
         }
-        self.write("batch.json", {"data": {"target0": status}})
+        self.write("batch.json", {"data": {"target0": status, "ci0": history_for_pr(status["pullRequest"])}})
         self.write("contexts.json", {"data": {"repository": {"object": {
             "oid": "a" * 40, "statusCheckRollup": {"contexts": {
                 "nodes": [{"__typename": "StatusContext", "state": "FAILURE"}],

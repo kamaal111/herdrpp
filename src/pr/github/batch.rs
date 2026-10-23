@@ -115,6 +115,11 @@ fn request(
         ]);
         variables.insert(format!("owner{index}"), json!(owner));
         variables.insert(format!("name{index}"), json!(name));
+        declarations.push(format!("$branch{index}:String!"));
+        variables.insert(
+            format!("branch{index}"),
+            json!(format!("refs/heads/{}", target.checkout.head_branch)),
+        );
         let selection = match &target.kind {
             TargetKind::PullRequest { number, .. } => {
                 declarations.push(format!("$pr{index}:Int!"));
@@ -123,20 +128,28 @@ fn request(
                     "pullRequest(number:$pr{index}) {{ number state isDraft commits(last:1) {{ nodes {{ commit {{ oid statusCheckRollup {{ contexts(first:100) {{ {CHECK_FIELDS} }} }} }} }} }} }}"
                 )
             }
-            TargetKind::DefaultBranch => {
-                declarations.push(format!("$branch{index}:String!"));
-                variables.insert(
-                    format!("branch{index}"),
-                    json!(format!("refs/heads/{}", target.checkout.head_branch)),
-                );
-                format!(
-                    "ref(qualifiedName:$branch{index}) {{ target {{ ... on Commit {{ history(first:10) {{ nodes {{ oid statusCheckRollup {{ contexts(first:100) {{ {CHECK_FIELDS} }} }} }} }} }} }} }}"
-                )
-            }
+            TargetKind::DefaultBranch => history_selection(index),
         };
         selections.push(format!(
             "target{index}: repository(owner:$owner{index},name:$name{index}) {{ {selection} }}"
         ));
+        if matches!(target.kind, TargetKind::PullRequest { .. }) {
+            let (owner, name) = target
+                .checkout
+                .head_repo
+                .split_once('/')
+                .context("invalid GitHub head repository")?;
+            declarations.extend([
+                format!("$ciOwner{index}:String!"),
+                format!("$ciName{index}:String!"),
+            ]);
+            variables.insert(format!("ciOwner{index}"), json!(owner));
+            variables.insert(format!("ciName{index}"), json!(name));
+            selections.push(format!(
+                "ci{index}: repository(owner:$ciOwner{index},name:$ciName{index}) {{ {} }}",
+                history_selection(index)
+            ));
+        }
     }
     let query = format!(
         "query StatusBatch({}) {{ {} }}",
@@ -185,13 +198,13 @@ fn request(
     Ok(response)
 }
 
-fn parse_target(
-    response: &Value,
-    index: usize,
-    target: &StatusTarget,
-    should_continue: &mut impl FnMut() -> Result<bool>,
-) -> Result<WorkspaceStatus> {
-    let alias = format!("target{index}");
+fn history_selection(index: usize) -> String {
+    format!(
+        "ref(qualifiedName:$branch{index}) {{ target {{ ... on Commit {{ history(first:10) {{ nodes {{ oid statusCheckRollup {{ contexts(first:100) {{ {CHECK_FIELDS} }} }} }} }} }} }} }}"
+    )
+}
+
+fn repository_result<'a>(response: &'a Value, alias: &str) -> Result<&'a Value> {
     if let Some(errors) = response.get("errors") {
         for error in errors.as_array().context("invalid GitHub GraphQL errors")? {
             let path = error.get("path").and_then(Value::as_array);
@@ -203,11 +216,34 @@ fn parse_target(
             );
         }
     }
-    let repository = response
+    response
         .get("data")
-        .and_then(|data| data.get(&alias))
+        .and_then(|data| data.get(alias))
         .filter(|value| !value.is_null())
-        .context("GitHub status target missing")?;
+        .context("GitHub status target missing")
+}
+
+fn branch_ci(
+    repository: &Value,
+    checkout: &Checkout,
+    should_continue: &mut impl FnMut() -> Result<bool>,
+) -> Result<Option<CiStatus>> {
+    let repository: HistoryRepository = serde_json::from_value(repository.clone())?;
+    let commits = repository.commits()?;
+    select_ci(
+        commits
+            .into_iter()
+            .map(|commit| complete_commit(checkout, &checkout.head_repo, commit, should_continue)),
+    )
+}
+
+fn parse_target(
+    response: &Value,
+    index: usize,
+    target: &StatusTarget,
+    should_continue: &mut impl FnMut() -> Result<bool>,
+) -> Result<WorkspaceStatus> {
+    let repository = repository_result(response, &format!("target{index}"))?;
     match target.kind {
         TargetKind::PullRequest {
             number,
@@ -219,6 +255,14 @@ fn parse_target(
                     .context("GitHub PR missing")?
                     .clone(),
             )?;
+            let history = repository_result(response, &format!("ci{index}"))?;
+            if history.get("ref") != Some(&Value::Null) {
+                let ci = branch_ci(history, &target.checkout, should_continue)?;
+                return details
+                    .metadata
+                    .summary(number, ci)
+                    .map(WorkspaceStatus::PullRequest);
+            }
             details.commits.nodes = details
                 .commits
                 .nodes
@@ -236,17 +280,7 @@ fn parse_target(
             summarize_pr(details, number).map(WorkspaceStatus::PullRequest)
         }
         TargetKind::DefaultBranch => {
-            let repository: HistoryRepository = serde_json::from_value(repository.clone())?;
-            let commits = repository.branch.target.history.nodes;
-            ensure!(commits.len() <= 10, "GitHub CI history exceeds 10 commits");
-            let ci = select_ci(commits.into_iter().map(|commit| {
-                complete_commit(
-                    &target.checkout,
-                    &target.checkout.head_repo,
-                    commit,
-                    should_continue,
-                )
-            }))?;
+            let ci = branch_ci(repository, &target.checkout, should_continue)?;
             Ok(WorkspaceStatus::DefaultBranch { ci })
         }
     }
