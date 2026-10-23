@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.1](https://github.com/kamaal111/herdrpp/compare/v0.10.0...v0.10.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **pr:** share CI lookup for Enterprise worktree status ([fae94a2](https://github.com/kamaal111/herdrpp/commit/fae94a2cdcf72b78459dc91bd1cf724beaec5fe0))
+
+
+### Performance Improvements
+
+* **pr:** reduce polling and batch GitHub status queries ([b0e6831](https://github.com/kamaal111/herdrpp/commit/b0e6831c31b1549acf02bd0b4c6104f3aedabbd5))
+
 ## [0.10.0](https://github.com/kamaal111/herdrpp/compare/v0.9.0...v0.10.0) (2026-10-20)
 
 
