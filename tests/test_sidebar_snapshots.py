@@ -351,9 +351,8 @@ import json,sys,pathlib
 if sys.argv[1:3] == ["repo","view"]:
     print(json.dumps({"nameWithOwner":"snapshot/TCG","url":"https://github.com/snapshot/TCG","defaultBranchRef":{"name":"main"}}))
 elif sys.argv[1:3] == ["api","graphql"]:
-    print(pathlib.Path(__file__).with_name("history.json").read_text())
-elif sys.argv[1:3] == ["pr","view"]:
-    print(pathlib.Path(__file__).with_name("details.json").read_text())
+    response = "details.json" if any("pullRequest(number:" in arg for arg in sys.argv) else "history.json"
+    print(pathlib.Path(__file__).with_name(response).read_text())
 else:
     print(json.dumps([{"number":95,"created_at":"2026-10-01T00:00:00Z","head":{"ref":"export-import","repo":{"full_name":"snapshot/TCG"}}}] if "head=snapshot:export-import" in sys.argv and not pathlib.Path(__file__).with_name("empty").exists() else []))
 """)
@@ -367,12 +366,16 @@ else:
             ]
         (fake.parent / "details.json").write_text(
             json.dumps(
-                {
-                    "number": 95,
-                    "state": state,
-                    "isDraft": draft,
-                    "statusCheckRollup": checks,
-                }
+                {"data": {"repository": {"pullRequest": {
+                    "number": 95, "state": state, "isDraft": draft,
+                    "commits": {"nodes": [{"commit": {
+                        "oid": "a" * 40,
+                        "statusCheckRollup": {"contexts": {
+                            "nodes": checks,
+                            "pageInfo": {"hasNextPage": False, "endCursor": None}
+                        }}
+                    }}]}
+                }}}}
             )
         )
         ci_state = {"ci-passed": "SUCCESS", "ci-failed": "FAILURE", "ci-pending": "PENDING", "cleared-ci": "SUCCESS"}.get(self.case)

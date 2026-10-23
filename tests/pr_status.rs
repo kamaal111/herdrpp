@@ -2,7 +2,14 @@ use herdrpp::pr::github::{CiStatus, Lifecycle, parse_ci_history, parse_summary};
 use serde_json::{Value, json};
 
 fn summary(state: &str, draft: bool, checks: Value) -> Value {
-    json!({"number":123,"state":state,"isDraft":draft,"statusCheckRollup":checks})
+    let rollup = checks.as_array().map(|checks| {
+        json!({"contexts": {
+            "nodes": checks, "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }})
+    });
+    json!({"number":123,"state":state,"isDraft":draft,"commits":{"nodes":[{
+        "commit":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","statusCheckRollup":rollup}
+    }]}})
 }
 
 fn check(status: &str, conclusion: Option<&str>) -> Value {
@@ -314,4 +321,28 @@ fn ci_rejects_missing_rollup_but_accepts_explicit_null() {
         .unwrap()
         .remove("statusCheckRollup");
     assert!(parse_ci_history(value.to_string().as_bytes()).is_err());
+}
+
+#[test]
+fn pr_requires_one_head_commit_with_complete_contexts() {
+    let mut missing_head = summary("OPEN", false, json!([]));
+    missing_head["commits"]["nodes"] = json!([]);
+    assert!(parse_summary(missing_head.to_string().as_bytes(), 123).is_err());
+
+    let mut multiple_heads = summary("OPEN", false, json!([]));
+    let head = multiple_heads["commits"]["nodes"][0].clone();
+    multiple_heads["commits"]["nodes"] = json!([head, head]);
+    assert!(parse_summary(multiple_heads.to_string().as_bytes(), 123).is_err());
+
+    let mut incomplete = summary("OPEN", false, json!([]));
+    incomplete["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"]["hasNextPage"] =
+        json!(true);
+    assert!(parse_summary(incomplete.to_string().as_bytes(), 123).is_err());
+
+    let mut missing_rollup = summary("OPEN", false, json!([]));
+    missing_rollup["commits"]["nodes"][0]["commit"]
+        .as_object_mut()
+        .unwrap()
+        .remove("statusCheckRollup");
+    assert!(parse_summary(missing_rollup.to_string().as_bytes(), 123).is_err());
 }
