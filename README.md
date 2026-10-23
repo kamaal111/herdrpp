@@ -372,13 +372,15 @@ herdr plugin action invoke herdrpp.start
 ```
 
 Refresh performs one cycle without starting a watcher. Automatic refresh runs
-immediately, then waits 60 seconds after each completed cycle. Lookups run
-sequentially. All reported checks count, including optional checks; failure
-wins over pending, then passing, and neutral/skipped checks are ignored.
+immediately, then waits 300 seconds after each completed cycle. Repository and
+PR discovery run sequentially. Status requests batch up to ten workspace targets
+per GitHub host, with additional requests for paginated checks. All reported
+checks count, including optional checks; failure wins over pending, then passing,
+and neutral/skipped checks are ignored.
 
 GitHub Enterprise hosts authenticated through `gh` are supported. Detached
 HEAD, non-Git directories, and local-only remotes have no association. Lookup
-failures preserve previous metadata until its 180-second expiry; confirmed
+failures preserve previous metadata until its 900-second expiry; confirmed
 empty results clear it. Once a default branch is confirmed, PR metadata is
 cleared even if CI retrieval fails; existing CI then expires without renewal.
 Stop, disable, and unlink leave displayed tokens to expire. Run start after re-enabling or recovering an exited watcher.

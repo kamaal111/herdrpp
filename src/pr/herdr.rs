@@ -205,7 +205,7 @@ fn report_metadata(
         }
     }
     if pr.is_some() || ci.is_some() {
-        args.extend(["--ttl-ms".into(), "180000".into()]);
+        args.extend(["--ttl-ms".into(), "900000".into()]);
     }
     if pr.is_none() {
         args.extend(["--clear-token".into(), TOKEN.into()]);

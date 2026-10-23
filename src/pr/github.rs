@@ -1,5 +1,8 @@
+mod batch;
+
 use crate::command::run;
 use anyhow::{Context, Result, ensure};
+pub(crate) use batch::{STATUS_BATCH_SIZE, StatusTarget, fetch_statuses, prepare};
 use serde::Deserialize;
 use std::{
     path::{Path, PathBuf},
@@ -261,6 +264,17 @@ enum PrState {
     Merged,
 }
 
+impl PrState {
+    fn lifecycle(self, is_draft: bool) -> Lifecycle {
+        match self {
+            Self::Merged => Lifecycle::Merged,
+            Self::Closed => Lifecycle::Closed,
+            Self::Open if is_draft => Lifecycle::Draft,
+            Self::Open => Lifecycle::Open,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PrDetails {
@@ -278,17 +292,6 @@ struct PrCommits {
 #[derive(Deserialize)]
 struct PrCommit {
     commit: CiCommit,
-}
-
-#[derive(Deserialize)]
-struct PrData {
-    repository: PrRepository,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PrRepository {
-    pull_request: PrDetails,
 }
 
 #[derive(Deserialize)]
@@ -384,12 +387,7 @@ fn summarize_pr(details: PrDetails, expected_number: u64) -> Result<PrSummary> {
         details.number > 0 && details.number == expected_number,
         "GitHub PR details number mismatch"
     );
-    let lifecycle = match details.state {
-        PrState::Merged => Lifecycle::Merged,
-        PrState::Closed => Lifecycle::Closed,
-        PrState::Open if details.is_draft => Lifecycle::Draft,
-        PrState::Open => Lifecycle::Open,
-    };
+    let lifecycle = details.state.lifecycle(details.is_draft);
     ensure!(
         details.commits.nodes.len() == 1,
         "GitHub PR has no unique head commit"
@@ -423,21 +421,23 @@ fn aggregate_checks(checks: Vec<Check>) -> Result<(Option<CiStatus>, bool)> {
 }
 
 pub fn lookup(checkout: &Checkout) -> std::result::Result<Option<WorkspaceStatus>, LookupFailure> {
-    let (resolved, default_branch, base_repository) = resolve_repository(checkout)?;
-    if default_branch {
-        return lookup_ci(&resolved, &resolved.head_branch)
-            .map(|ci| Some(WorkspaceStatus::DefaultBranch { ci }))
-            .map_err(|error| LookupFailure {
-                default_branch: true,
-                message: format!("{error:#}"),
-            });
-    }
-    lookup_pr(&resolved, &base_repository)
-        .map(|pr| pr.map(WorkspaceStatus::PullRequest))
-        .map_err(Into::into)
+    let Some(target) = prepare(checkout, &mut || Ok(true))? else {
+        return Ok(None);
+    };
+    fetch_statuses(&[target], &mut || Ok(true))
+        .pop()
+        .context("GitHub status result missing")?
 }
 
 fn resolve_repository(checkout: &Checkout) -> Result<(Checkout, bool, String)> {
+    resolve_repository_while(checkout, &mut || Ok(true))
+}
+
+fn resolve_repository_while(
+    checkout: &Checkout,
+    should_continue: &mut impl FnMut() -> Result<bool>,
+) -> Result<(Checkout, bool, String)> {
+    ensure!(should_continue()?, "GitHub status lookup stopped");
     let repository: Repository = serde_json::from_slice(&run(
         gh(checkout).args([
             "repo",
@@ -470,6 +470,7 @@ fn resolve_repository(checkout: &Checkout) -> Result<(Checkout, bool, String)> {
     let head_repository = if base.repository.eq_ignore_ascii_case(&checkout.head_repo) {
         repository
     } else {
+        ensure!(should_continue()?, "GitHub status lookup stopped");
         let name = format!("{}/{}", checkout.host, checkout.head_repo);
         let head: Repository = serde_json::from_slice(&run(
             gh(checkout).args([
@@ -514,7 +515,7 @@ impl Repository {
     }
 }
 
-fn lookup_pr(checkout: &Checkout, base_repository: &str) -> Result<Option<PrSummary>> {
+fn lookup_pr_number(checkout: &Checkout, base_repository: &str) -> Result<Option<u64>> {
     let (owner, _) = checkout
         .head_repo
         .split_once('/')
@@ -543,26 +544,7 @@ fn lookup_pr(checkout: &Checkout, base_repository: &str) -> Result<Option<PrSumm
         ]),
         Duration::from_secs(20),
     )?;
-    let Some(number) = newest_pr(&output, checkout)? else {
-        return Ok(None);
-    };
-    let query = format!(
-        "query($owner:String!,$name:String!) {{ repository(owner:$owner,name:$name) {{ pullRequest(number:{number}) {{ number state isDraft commits(last:1) {{ nodes {{ commit {{ oid statusCheckRollup {{ contexts(first:100) {{ {CHECK_FIELDS} }} }} }} }} }} }} }} }}"
-    );
-    let output = ci_query(checkout, base_repository, &query, &[])?;
-    let mut data: PrData = graphql_data(&output)?;
-    data.repository.pull_request.commits.nodes = data
-        .repository
-        .pull_request
-        .commits
-        .nodes
-        .into_iter()
-        .map(|node| {
-            load_ci_contexts(checkout, base_repository, node.commit)
-                .map(|commit| PrCommit { commit })
-        })
-        .collect::<Result<_>>()?;
-    summarize_pr(data.repository.pull_request, number).map(Some)
+    newest_pr(&output, checkout)
 }
 
 fn pr_view(
@@ -753,34 +735,18 @@ fn ci_query(
     run(&mut command, Duration::from_secs(20))
 }
 
-fn lookup_ci(checkout: &Checkout, branch: &str) -> Result<Option<CiStatus>> {
-    let query = format!(
-        "query($owner:String!,$name:String!,$branch:String!) {{ repository(owner:$owner,name:$name) {{ ref(qualifiedName:$branch) {{ target {{ ... on Commit {{ history(first:10) {{ nodes {{ oid statusCheckRollup {{ contexts(first:100) {{ {CHECK_FIELDS} }} }} }} }} }} }} }} }} }}"
-    );
-    let bytes = ci_query(
-        checkout,
-        &checkout.head_repo,
-        &query,
-        &[("branch", &format!("refs/heads/{branch}"))],
-    )?;
-    let commits = ci_history(&bytes)?;
-    select_ci(
-        commits
-            .into_iter()
-            .map(|commit| load_ci_contexts(checkout, &checkout.head_repo, commit)),
-    )
-}
-
-fn load_ci_contexts(
+fn complete_commit(
     checkout: &Checkout,
     repository: &str,
     mut commit: CiCommit,
+    should_continue: &mut impl FnMut() -> Result<bool>,
 ) -> Result<CiCommit> {
     let page_query = format!(
         "query($owner:String!,$name:String!,$oid:GitObjectID!,$cursor:String!) {{ repository(owner:$owner,name:$name) {{ object(oid:$oid) {{ ... on Commit {{ oid statusCheckRollup {{ contexts(first:100,after:$cursor) {{ {CHECK_FIELDS} }} }} }} }} }} }}"
     );
     if let Some(rollup) = &mut commit.status_check_rollup {
         while rollup.contexts.page_info.has_next_page {
+            ensure!(should_continue()?, "GitHub status lookup stopped");
             let cursor = rollup
                 .contexts
                 .page_info
