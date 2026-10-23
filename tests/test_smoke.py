@@ -44,17 +44,6 @@ else:
     elif args[:2] == ["repo", "view"]:
         print((root / "repository.json").read_text() if (root / "repository.json").exists()
               else '{"nameWithOwner":"alice/project","url":"https://github.com/alice/project","defaultBranchRef":{"name":"main"}}')
-    elif args[:2] == ["pr", "view"]:
-        if (root / "details-fail").exists():
-            print("PR details unavailable", file=sys.stderr)
-            sys.exit(1)
-        if (root / "details.json").exists():
-            print((root / "details.json").read_text())
-        else:
-            prs = json.loads((root / "prs.json").read_text())
-            selected = next(pr for pr in prs if pr["number"] == int(args[2]))
-            print(json.dumps({"number": selected["number"], "state": selected["state"].upper(),
-                "isDraft": False, "statusCheckRollup": []}))
     elif args[:2] == ["api", "graphql"]:
         if (root / "ci-fail").exists():
             sys.exit(1)
@@ -62,8 +51,30 @@ else:
             subprocess.run(["git", "checkout", "-q", "other"], check=True)
         if (root / "remote-switch").exists():
             subprocess.run(["git", "remote", "set-url", "company", "https://github.com/bob/other.git"], check=True)
-        response = "contexts.json" if any(arg.startswith("oid=") for arg in args) else "history.json"
-        print((root / response).read_text())
+        if any("pullRequest(number:" in arg for arg in args):
+            if (root / "details-fail").exists():
+                print("PR details unavailable", file=sys.stderr)
+                sys.exit(1)
+            if (root / "pr-response.json").exists():
+                print((root / "pr-response.json").read_text())
+                sys.exit(0)
+            if (root / "details.json").exists():
+                details = json.loads((root / "details.json").read_text())
+            else:
+                number = int(next(arg.split("pullRequest(number:")[1].split(")")[0] for arg in args if "pullRequest(number:" in arg))
+                prs = json.loads((root / "prs.json").read_text())
+                selected = next(pr for pr in prs if pr["number"] == number)
+                details = {"number": number, "state": selected["state"].upper(),
+                    "isDraft": False, "statusCheckRollup": []}
+            if "statusCheckRollup" in details:
+                checks = details.pop("statusCheckRollup")
+                details["commits"] = {"nodes": [{"commit": {"oid": "a" * 40,
+                    "statusCheckRollup": {"contexts": {"nodes": checks,
+                        "pageInfo": {"hasNextPage": False, "endCursor": None}}} if checks is not None else None}}]}
+            print(json.dumps({"data": {"repository": {"pullRequest": details}}}))
+        else:
+            response = "contexts.json" if any(arg.startswith("oid=") for arg in args) else "history.json"
+            print((root / response).read_text())
     elif args[0] == "api":
         if (root / "branch-switch").exists():
             subprocess.run(["git", "checkout", "-q", "other"], check=True)
@@ -296,7 +307,7 @@ class TestPluginSmoke:
             ]
         ]
         api_args = [
-            args for kind, args in self.calls() if kind == "gh" and args[0] == "api"
+            args for kind, args in self.calls() if kind == "gh" and "state=all" in args
         ][0]
         assert "state=all" in api_args
         assert "head=alice:feature" in api_args
@@ -304,49 +315,104 @@ class TestPluginSmoke:
 
     def test_details_are_scoped_to_selected_pr_base_repository_and_host(self):
         self.run_plugin("refresh")
-        details_args = [
-            args
-            for kind, args in self.calls()
-            if kind == "gh" and args[:2] == ["pr", "view"]
-        ]
-        assert details_args == [
-            [
-                "pr",
-                "view",
-                "123",
-                "--repo",
-                "github.com/alice/project",
-                "--json",
-                "number,state,isDraft,statusCheckRollup",
-            ]
-        ]
+        queries = [args for kind, args in self.calls()
+                   if kind == "gh" and args[:2] == ["api", "graphql"]]
+        assert len(queries) == 1
+        assert "github.com" == queries[0][queries[0].index("--hostname") + 1]
+        assert "owner=alice" in queries[0]
+        assert "name=project" in queries[0]
+        assert "pullRequest(number:123)" in next(arg for arg in queries[0] if arg.startswith("query="))
+        assert [args for kind, args in self.calls() if kind == "gh" and args[:2] == ["pr", "view"]] == []
 
     def test_fork_pr_details_use_resolved_base_repository_on_enterprise_host(self):
         self.git("remote", "set-url", "origin", "git@github.example:alice/fork.git")
-        self.write(
-            "repository.json",
-            {
-                "nameWithOwner": "upstream/project",
-                "url": "https://github.example/upstream/project",
-            },
-        )
+        self.write("repository.json", {
+            "nameWithOwner": "upstream/project",
+            "url": "https://github.example/upstream/project",
+        })
         self.write("prs.json", [pr(123, repo="alice/fork")])
         self.run_plugin("refresh")
-        details_args = [
-            args
-            for kind, args in self.calls()
-            if kind == "gh" and args[:2] == ["pr", "view"]
-        ][0]
-        api_args = [
-            args for kind, args in self.calls() if kind == "gh" and args[0] == "api"
-        ][0]
-        assert (
-            details_args[details_args.index("--repo") + 1]
-            == "github.example/upstream/project"
-        )
-        assert api_args[api_args.index("--hostname") + 1] == "github.example"
-        assert "repos/upstream/project/pulls" in api_args
+        queries = [args for kind, args in self.calls()
+                   if kind == "gh" and args[:2] == ["api", "graphql"]]
+        assert "github.example" == queries[0][queries[0].index("--hostname") + 1]
+        assert "owner=upstream" in queries[0]
+        assert "name=project" in queries[0]
         assert "pr_open=#123" in self.reports()[0]
+
+    @pytest.mark.parametrize("state,icon", [("SUCCESS", "✅"), ("FAILURE", "❌"), ("PENDING", "🟡")])
+    def test_enterprise_linked_worktree_reports_pr_checks(self, state, icon):
+        self.git("remote", "set-url", "origin", "git@github.example:alice/project.git")
+        self.write("repository.json", {"nameWithOwner": "alice/project",
+            "url": "https://github.example/alice/project", "defaultBranchRef": {"name": "main"}})
+        worktree = self.root / "worktree"
+        self.git("worktree", "add", "-q", "-b", "task/worktree", str(worktree))
+        self.set_workspaces([self.workspace("w1", worktree)])
+        self.write("prs.json", [pr(123, branch="task/worktree")])
+        self.write("details.json", {"number": 123, "state": "OPEN", "isDraft": False,
+            "statusCheckRollup": [{"__typename": "StatusContext", "state": state}]})
+        self.run_plugin("refresh")
+        assert f"pr_open=#123 {icon}" in self.reports()[0]
+        queries = [args for kind, args in self.calls()
+                   if kind == "gh" and args[:2] == ["api", "graphql"]]
+        assert len(queries) == 1
+        assert "github.example" == queries[0][queries[0].index("--hostname") + 1]
+        assert "commits(last:1)" in next(arg for arg in queries[0] if arg.startswith("query="))
+        assert "head=alice:task/worktree" in next(args for kind, args in self.calls() if kind == "gh" and "state=all" in args)
+
+    def set_pr_response(self, contexts, page_info=None):
+        self.write("pr-response.json", {"data": {"repository": {"pullRequest": {
+            "number": 123, "state": "OPEN", "isDraft": False,
+            "commits": {"nodes": [{"commit": {
+                "oid": "a" * 40, "statusCheckRollup": {"contexts": {
+                    "nodes": contexts,
+                    "pageInfo": page_info or {"hasNextPage": False, "endCursor": None}
+                }}
+            }}]}
+        }}}})
+
+    def test_enterprise_fork_pr_paginates_head_checks_in_base_repository(self):
+        self.git("remote", "set-url", "origin", "git@github.example:alice/fork.git")
+        self.write("repository.json", {"nameWithOwner": "upstream/project",
+            "url": "https://github.example/upstream/project"})
+        self.write("prs.json", [pr(123, repo="alice/fork")])
+        self.set_pr_response(
+            [{"__typename": "StatusContext", "state": "SUCCESS"}] * 100,
+            {"hasNextPage": True, "endCursor": "page-1"})
+        self.write("contexts.json", {"data": {"repository": {"object": {
+            "oid": "a" * 40, "statusCheckRollup": {"contexts": {
+                "nodes": [{"__typename": "StatusContext", "state": "FAILURE"}],
+                "pageInfo": {"hasNextPage": False, "endCursor": None}
+            }}
+        }}}})
+        self.run_plugin("refresh")
+        assert "pr_open=#123 ❌" in self.reports()[0]
+        queries = [args for kind, args in self.calls()
+                   if kind == "gh" and args[:2] == ["api", "graphql"]]
+        assert len(queries) == 2
+        assert "cursor=page-1" in queries[1]
+        assert "oid=" + "a" * 40 in queries[1]
+        assert all("owner=upstream" in args and "name=project" in args
+                   and args[args.index("--hostname") + 1] == "github.example" for args in queries)
+
+    @pytest.mark.parametrize("response", [
+        {"data": None, "errors": [{"message": "unavailable"}]},
+        {"data": {"repository": {"pullRequest": None}}},
+        {"data": {"repository": {"pullRequest": {"number": 124, "state": "OPEN",
+            "isDraft": False, "commits": {"nodes": []}}}}},
+    ])
+    def test_pr_graphql_failure_preserves_metadata(self, response):
+        self.run_plugin("refresh")
+        self.write("pr-response.json", response)
+        assert self.run_plugin("refresh", check=False).returncode != 0
+        assert len(self.reports()) == 1
+
+    def test_pr_head_without_checks_does_not_use_previous_commit(self):
+        self.set_pr_response([])
+        self.run_plugin("refresh")
+        assert "pr_open=#123" in self.reports()[0]
+        assert "pr_open=#123 ✅" not in self.reports()[0]
+        assert "pr_open=#123 🟡" not in self.reports()[0]
+        assert "pr_open=#123 ❌" not in self.reports()[0]
 
     def test_lifecycle_transitions_replace_tokens_and_ci_icons(self):
         self.write(
@@ -429,7 +495,7 @@ class TestPluginSmoke:
         assert [
             args
             for kind, args in self.calls()
-            if kind == "gh" and args[:2] == ["pr", "view"]
+            if kind == "gh" and args[:2] == ["api", "graphql"]
         ] == []
 
     def test_details_failure_preserves_all_metadata_then_recovers(self):
@@ -493,7 +559,7 @@ class TestPluginSmoke:
                 [
                     args
                     for kind, args in self.calls()
-                    if kind == "gh" and args[0] == "api"
+                    if kind == "gh" and "state=all" in args
                 ]
             )
             == 1
@@ -504,7 +570,7 @@ class TestPluginSmoke:
                 [
                     args
                     for kind, args in self.calls()
-                    if kind == "gh" and args[:2] == ["pr", "view"]
+                    if kind == "gh" and args[:2] == ["api", "graphql"]
                 ]
             )
             == 1
@@ -783,7 +849,7 @@ class TestPluginSmoke:
                 [
                     args
                     for kind, args in self.calls()
-                    if kind == "gh" and args[0] == "api"
+                    if kind == "gh" and "state=all" in args
                 ]
             )
             == 1
@@ -814,7 +880,7 @@ class TestPluginSmoke:
                 [
                     args
                     for kind, args in calls[: report_positions[1]]
-                    if kind == "gh" and args[0] == "api"
+                    if kind == "gh" and "state=all" in args
                 ]
             )
             == 2
@@ -873,7 +939,7 @@ class TestPluginSmoke:
         assert (
             "head=alice:remote-feature"
             in [
-                args for kind, args in self.calls() if kind == "gh" and args[0] == "api"
+                args for kind, args in self.calls() if kind == "gh" and "state=all" in args
             ][0]
         )
 
@@ -1010,7 +1076,10 @@ class TestPluginSmoke:
         self.write("prs.json", [pr(321, branch="gitbutler/feature")])
         self.run_plugin("refresh")
         assert "pr_number=#321" in self.reports()[0]
-        assert [args for kind, args in self.calls() if kind == "gh" and args[:2] == ["api", "graphql"]] == []
+        queries = [args for kind, args in self.calls()
+                   if kind == "gh" and args[:2] == ["api", "graphql"]]
+        assert len(queries) == 1
+        assert "pullRequest(number:321)" in next(arg for arg in queries[0] if arg.startswith("query="))
 
     @pytest.mark.parametrize("branch", ["main", "master", "trunk"])
     def test_default_branch_shows_ci_and_never_queries_historical_pr(self, branch):

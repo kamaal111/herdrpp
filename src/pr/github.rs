@@ -267,7 +267,28 @@ struct PrDetails {
     number: u64,
     state: PrState,
     is_draft: bool,
-    status_check_rollup: Option<Vec<Check>>,
+    commits: PrCommits,
+}
+
+#[derive(Deserialize)]
+struct PrCommits {
+    nodes: Vec<PrCommit>,
+}
+
+#[derive(Deserialize)]
+struct PrCommit {
+    commit: CiCommit,
+}
+
+#[derive(Deserialize)]
+struct PrData {
+    repository: PrRepository,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrRepository {
+    pull_request: PrDetails,
 }
 
 #[derive(Deserialize)]
@@ -355,6 +376,10 @@ impl Check {
 
 pub fn parse_summary(bytes: &[u8], expected_number: u64) -> Result<PrSummary> {
     let details: PrDetails = serde_json::from_slice(bytes).context("parse GitHub PR details")?;
+    summarize_pr(details, expected_number)
+}
+
+fn summarize_pr(details: PrDetails, expected_number: u64) -> Result<PrSummary> {
     ensure!(
         details.number > 0 && details.number == expected_number,
         "GitHub PR details number mismatch"
@@ -365,7 +390,19 @@ pub fn parse_summary(bytes: &[u8], expected_number: u64) -> Result<PrSummary> {
         PrState::Open if details.is_draft => Lifecycle::Draft,
         PrState::Open => Lifecycle::Open,
     };
-    let (ci, _) = aggregate_checks(details.status_check_rollup.unwrap_or_default())?;
+    ensure!(
+        details.commits.nodes.len() == 1,
+        "GitHub PR has no unique head commit"
+    );
+    let (ci, _) = commit_ci(
+        details
+            .commits
+            .nodes
+            .into_iter()
+            .next()
+            .context("GitHub PR has no head commit")?
+            .commit,
+    )?;
     Ok(PrSummary {
         number: details.number,
         lifecycle,
@@ -509,13 +546,23 @@ fn lookup_pr(checkout: &Checkout, base_repository: &str) -> Result<Option<PrSumm
     let Some(number) = newest_pr(&output, checkout)? else {
         return Ok(None);
     };
-    let output = pr_view(
-        checkout,
-        base_repository,
-        number,
-        "number,state,isDraft,statusCheckRollup",
-    )?;
-    parse_summary(&output, number).map(Some)
+    let query = format!(
+        "query($owner:String!,$name:String!) {{ repository(owner:$owner,name:$name) {{ pullRequest(number:{number}) {{ number state isDraft commits(last:1) {{ nodes {{ commit {{ oid statusCheckRollup {{ contexts(first:100) {{ {CHECK_FIELDS} }} }} }} }} }} }} }} }}"
+    );
+    let output = ci_query(checkout, base_repository, &query, &[])?;
+    let mut data: PrData = graphql_data(&output)?;
+    data.repository.pull_request.commits.nodes = data
+        .repository
+        .pull_request
+        .commits
+        .nodes
+        .into_iter()
+        .map(|node| {
+            load_ci_contexts(checkout, base_repository, node.commit)
+                .map(|commit| PrCommit { commit })
+        })
+        .collect::<Result<_>>()?;
+    summarize_pr(data.repository.pull_request, number).map(Some)
 }
 
 fn pr_view(
@@ -678,9 +725,13 @@ pub fn parse_ci_history(bytes: &[u8]) -> Result<Option<CiStatus>> {
     select_ci(ci_history(bytes)?.into_iter().map(Ok))
 }
 
-fn ci_query(checkout: &Checkout, query: &str, fields: &[(&str, &str)]) -> Result<Vec<u8>> {
-    let (owner, name) = checkout
-        .head_repo
+fn ci_query(
+    checkout: &Checkout,
+    repository: &str,
+    query: &str,
+    fields: &[(&str, &str)],
+) -> Result<Vec<u8>> {
+    let (owner, name) = repository
         .split_once('/')
         .context("invalid head repository")?;
     let mut command = gh(checkout);
@@ -708,47 +759,59 @@ fn lookup_ci(checkout: &Checkout, branch: &str) -> Result<Option<CiStatus>> {
     );
     let bytes = ci_query(
         checkout,
+        &checkout.head_repo,
         &query,
         &[("branch", &format!("refs/heads/{branch}"))],
     )?;
     let commits = ci_history(&bytes)?;
+    select_ci(
+        commits
+            .into_iter()
+            .map(|commit| load_ci_contexts(checkout, &checkout.head_repo, commit)),
+    )
+}
+
+fn load_ci_contexts(
+    checkout: &Checkout,
+    repository: &str,
+    mut commit: CiCommit,
+) -> Result<CiCommit> {
     let page_query = format!(
         "query($owner:String!,$name:String!,$oid:GitObjectID!,$cursor:String!) {{ repository(owner:$owner,name:$name) {{ object(oid:$oid) {{ ... on Commit {{ oid statusCheckRollup {{ contexts(first:100,after:$cursor) {{ {CHECK_FIELDS} }} }} }} }} }} }}"
     );
-    select_ci(commits.into_iter().map(|mut commit| {
-        if let Some(rollup) = &mut commit.status_check_rollup {
-            while rollup.contexts.page_info.has_next_page {
-                let cursor = rollup
-                    .contexts
-                    .page_info
-                    .end_cursor
-                    .as_deref()
-                    .context("GitHub CI contexts have no next cursor")?;
-                let bytes = ci_query(
-                    checkout,
-                    &page_query,
-                    &[("oid", &commit.oid), ("cursor", cursor)],
-                )?;
-                let data: ContextData = graphql_data(&bytes)?;
-                ensure!(
-                    data.repository.object.oid == commit.oid,
-                    "GitHub CI commit identity changed"
-                );
-                let next = data
-                    .repository
-                    .object
-                    .status_check_rollup
-                    .context("GitHub CI rollup disappeared")?
-                    .contexts;
-                ensure!(
-                    !next.page_info.has_next_page
-                        || next.page_info.end_cursor.as_deref() != Some(cursor),
-                    "GitHub CI cursor did not advance"
-                );
-                rollup.contexts.nodes.extend(next.nodes);
-                rollup.contexts.page_info = next.page_info;
-            }
+    if let Some(rollup) = &mut commit.status_check_rollup {
+        while rollup.contexts.page_info.has_next_page {
+            let cursor = rollup
+                .contexts
+                .page_info
+                .end_cursor
+                .as_deref()
+                .context("GitHub CI contexts have no next cursor")?;
+            let bytes = ci_query(
+                checkout,
+                repository,
+                &page_query,
+                &[("oid", &commit.oid), ("cursor", cursor)],
+            )?;
+            let data: ContextData = graphql_data(&bytes)?;
+            ensure!(
+                data.repository.object.oid == commit.oid,
+                "GitHub CI commit identity changed"
+            );
+            let next = data
+                .repository
+                .object
+                .status_check_rollup
+                .context("GitHub CI rollup disappeared")?
+                .contexts;
+            ensure!(
+                !next.page_info.has_next_page
+                    || next.page_info.end_cursor.as_deref() != Some(cursor),
+                "GitHub CI cursor did not advance"
+            );
+            rollup.contexts.nodes.extend(next.nodes);
+            rollup.contexts.page_info = next.page_info;
         }
-        Ok(commit)
-    }))
+    }
+    Ok(commit)
 }

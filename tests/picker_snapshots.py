@@ -306,7 +306,13 @@ enabled = false
                                  state="closed" if state == "MERGED" else state.lower(),
                                  head=dict(ref=label, repo=dict(full_name="snapshot/herdrpp"))),
                 details=dict(number=number, state=state, isDraft=draft,
-                             statusCheckRollup=[dict(__typename="StatusContext", state=check)]),
+                             commits={"nodes": [{"commit": {
+                                 "oid": "a" * 40,
+                                 "statusCheckRollup": {"contexts": {
+                                     "nodes": [dict(__typename="StatusContext", state=check)],
+                                     "pageInfo": {"hasNextPage": False, "endCursor": None}
+                                 }}
+                             }}]}),
             ))
         (directory / "prs.json").write_text(json.dumps(fixtures))
         fake = directory / "gh"
@@ -317,9 +323,13 @@ args = sys.argv[1:]
 if args[:2] == ["repo", "view"]:
     print(json.dumps({"nameWithOwner":"snapshot/herdrpp", "url":"https://github.com/snapshot/herdrpp", "defaultBranchRef":{"name":"main"}}))
 elif args[:2] == ["api", "graphql"]:
-    print(json.dumps({"data":{"repository":{"ref":{"target":{"history":{"nodes":[]}}}}}}))
-elif args[:2] == ["pr", "view"]:
-    print(json.dumps(next(case["details"] for case in fixtures if case["details"]["number"] == int(args[2]))))
+    query = next(arg for arg in args if arg.startswith("query="))
+    if "pullRequest(number:" in query:
+        number = int(query.split("pullRequest(number:")[1].split(")")[0])
+        details = next(case["details"] for case in fixtures if case["details"]["number"] == number)
+        print(json.dumps({"data": {"repository": {"pullRequest": details}}}))
+    else:
+        print(json.dumps({"data":{"repository":{"ref":{"target":{"history":{"nodes":[]}}}}}}))
 elif args[0] == "api":
     print(json.dumps([case["association"] for case in fixtures if "head=snapshot:" + case["branch"] in args]))
 else:
