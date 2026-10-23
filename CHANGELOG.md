@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/kamaal111/herdrpp/compare/v0.10.1...v0.10.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **pr:** reuse branch history for worktree CI status ([61c4fd2](https://github.com/kamaal111/herdrpp/commit/61c4fd2a991d2012f523ce7e7afdd9f6f4a12ed4))
+
 ## [0.10.1](https://github.com/kamaal111/herdrpp/compare/v0.10.0...v0.10.1) (2026-10-23)
 
 
