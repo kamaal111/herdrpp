@@ -298,6 +298,7 @@ enabled = false
     def prepare_showcase_github(self):
         directory = self.directory / "bin"
         directory.mkdir()
+        shutil.copyfile(ROOT / "tests/fake_github_graphql.py", directory / "fake_github_graphql.py")
         fixtures = []
         for number, label, state, draft, check, _, _, _ in SHOWCASE_PRS:
             fixtures.append(dict(
@@ -318,18 +319,17 @@ enabled = false
         fake = directory / "gh"
         fake.write_text("""#!/usr/bin/env python3
 import json, pathlib, sys
+from fake_github_graphql import status_response
 fixtures = json.loads(pathlib.Path(__file__).with_name("prs.json").read_text())
 args = sys.argv[1:]
 if args[:2] == ["repo", "view"]:
     print(json.dumps({"nameWithOwner":"snapshot/herdrpp", "url":"https://github.com/snapshot/herdrpp", "defaultBranchRef":{"name":"main"}}))
 elif args[:2] == ["api", "graphql"]:
-    query = next(arg for arg in args if arg.startswith("query="))
-    if "pullRequest(number:" in query:
-        number = int(query.split("pullRequest(number:")[1].split(")")[0])
-        details = next(case["details"] for case in fixtures if case["details"]["number"] == number)
-        print(json.dumps({"data": {"repository": {"pullRequest": details}}}))
-    else:
-        print(json.dumps({"data":{"repository":{"ref":{"target":{"history":{"nodes":[]}}}}}}))
+    history = {"data":{"repository":{"ref":{"target":{"history":{"nodes":[]}}}}}}
+    details = lambda number: next(case["details"] for case in fixtures if case["details"]["number"] == number)
+    print(json.dumps(status_response(args, details, history)))
+elif args[:2] == ["pr", "view"]:
+    print(json.dumps(next(case["details"] for case in fixtures if case["details"]["number"] == int(args[2]))))
 elif args[0] == "api":
     print(json.dumps([case["association"] for case in fixtures if "head=snapshot:" + case["branch"] in args]))
 else:

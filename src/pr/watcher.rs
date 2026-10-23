@@ -20,7 +20,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 
 struct Wakeup(File);
 
@@ -327,7 +327,7 @@ impl Session {
             .lock("control.lock")?
             .context("another start/stop is in progress")?;
         self.request_stop()?;
-        println!("Stop requested; PR tokens expire within 180 seconds");
+        println!("Stop requested; PR tokens expire within 900 seconds");
         Ok(())
     }
 
@@ -401,6 +401,10 @@ impl Session {
         Ok(())
     }
 
+    fn refresh_allowed(&self, manual: bool) -> Result<bool> {
+        Ok(self.same_session() && (manual || (!self.stopped() && herdr::enabled()?)))
+    }
+
     pub fn refresh(&self, manual: bool) -> Result<()> {
         let Some(_refresh) = self.lock("refresh.lock")? else {
             if manual {
@@ -415,58 +419,88 @@ impl Session {
         > = HashMap::new();
         let mut failures = 0;
         let mut reported = 0;
-        for workspace in &snapshot.workspaces {
-            if !self.same_session() || (!manual && (self.stopped() || !herdr::enabled()?)) {
-                break;
-            }
-            let result = (|| -> Result<()> {
+        'refresh: for workspaces in snapshot.workspaces.chunks(github::STATUS_BATCH_SIZE) {
+            let mut originals = Vec::new();
+            let mut targets: Vec<(Checkout, github::StatusTarget)> = Vec::new();
+            for workspace in workspaces {
+                if !self.refresh_allowed(manual)? {
+                    break 'refresh;
+                }
                 let original = snapshot
                     .directory(workspace)
                     .map(github::checkout)
-                    .transpose()?
-                    .flatten();
-                let pr = match &original {
-                    Some(checkout) => cache
-                        .entry(checkout.clone())
-                        .or_insert_with(|| github::lookup(checkout))
-                        .clone(),
-                    None => Ok(None),
-                };
-                let fresh = herdr::snapshot()?;
-                let Some(current) = fresh
-                    .workspaces
-                    .iter()
-                    .find(|w| w.workspace_id == workspace.workspace_id)
-                else {
-                    return Ok(());
-                };
-                let current_checkout = fresh
-                    .directory(current)
-                    .map(github::checkout)
-                    .transpose()?
-                    .flatten();
-                if !self.same_session() || (!manual && (self.stopped() || !herdr::enabled()?)) {
-                    return Ok(());
-                }
-                if original != current_checkout {
-                    herdr::report(&workspace.workspace_id, None)?;
-                } else {
-                    match pr {
-                        Ok(status) => herdr::report(&workspace.workspace_id, status)?,
+                    .transpose()
+                    .map(Option::flatten);
+                if let Ok(Some(checkout)) = &original
+                    && !cache.contains_key(checkout)
+                    && !targets.iter().any(|(key, _)| key == checkout)
+                {
+                    match github::prepare(checkout, &mut || self.refresh_allowed(manual)) {
+                        Ok(Some(target)) => targets.push((checkout.clone(), target)),
+                        Ok(None) => {
+                            cache.insert(checkout.clone(), Ok(None));
+                        }
                         Err(error) => {
-                            if error.default_branch {
-                                herdr::clear_pr(&workspace.workspace_id)?;
-                            }
-                            return Err(error.into());
+                            cache.insert(checkout.clone(), Err(error));
                         }
                     }
                 }
-                reported += 1;
-                Ok(())
-            })();
-            if let Err(error) = result {
-                failures += 1;
-                eprintln!("workspace {}: {error:#}", workspace.workspace_id);
+                originals.push(original);
+            }
+            let pending: Vec<_> = targets.iter().map(|(_, target)| target.clone()).collect();
+            let statuses = github::fetch_statuses(&pending, &mut || self.refresh_allowed(manual));
+            for ((checkout, _), result) in targets.into_iter().zip(statuses) {
+                cache.insert(checkout, result);
+            }
+            for (workspace, original) in workspaces.iter().zip(originals) {
+                if !self.refresh_allowed(manual)? {
+                    break 'refresh;
+                }
+                let result = (|| -> Result<()> {
+                    let original = original?;
+                    let pr = match &original {
+                        Some(checkout) => cache
+                            .get(checkout)
+                            .context("GitHub status result missing")?
+                            .clone(),
+                        None => Ok(None),
+                    };
+                    let fresh = herdr::snapshot()?;
+                    let Some(current) = fresh
+                        .workspaces
+                        .iter()
+                        .find(|w| w.workspace_id == workspace.workspace_id)
+                    else {
+                        return Ok(());
+                    };
+                    let current_checkout = fresh
+                        .directory(current)
+                        .map(github::checkout)
+                        .transpose()?
+                        .flatten();
+                    if !self.refresh_allowed(manual)? {
+                        return Ok(());
+                    }
+                    if original != current_checkout {
+                        herdr::report(&workspace.workspace_id, None)?;
+                    } else {
+                        match pr {
+                            Ok(status) => herdr::report(&workspace.workspace_id, status)?,
+                            Err(error) => {
+                                if error.default_branch {
+                                    herdr::clear_pr(&workspace.workspace_id)?;
+                                }
+                                return Err(error.into());
+                            }
+                        }
+                    }
+                    reported += 1;
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    failures += 1;
+                    eprintln!("workspace {}: {error:#}", workspace.workspace_id);
+                }
             }
         }
         eprintln!("PR refresh: {reported} workspace reports, {failures} failures");

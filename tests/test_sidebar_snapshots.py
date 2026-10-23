@@ -346,13 +346,18 @@ enabled = false
         config.write_text(self.base_config + self.sidebar_config)
         fake = self.directory / "bin/gh"
         fake.parent.mkdir()
+        shutil.copyfile(ROOT / "tests/fake_github_graphql.py", fake.parent / "fake_github_graphql.py")
         fake.write_text("""#!/usr/bin/env python3
 import json,sys,pathlib
+from fake_github_graphql import status_response
 if sys.argv[1:3] == ["repo","view"]:
     print(json.dumps({"nameWithOwner":"snapshot/TCG","url":"https://github.com/snapshot/TCG","defaultBranchRef":{"name":"main"}}))
 elif sys.argv[1:3] == ["api","graphql"]:
-    response = "details.json" if any("pullRequest(number:" in arg for arg in sys.argv) else "history.json"
-    print(pathlib.Path(__file__).with_name(response).read_text())
+    history = json.loads(pathlib.Path(__file__).with_name("history.json").read_text())
+    details = json.loads(pathlib.Path(__file__).with_name("details.json").read_text())
+    print(json.dumps(status_response(sys.argv[1:], lambda number: details["data"]["repository"]["pullRequest"], history)))
+elif sys.argv[1:3] == ["pr","view"]:
+    print(pathlib.Path(__file__).with_name("details.json").read_text())
 else:
     print(json.dumps([{"number":95,"created_at":"2026-10-01T00:00:00Z","head":{"ref":"export-import","repo":{"full_name":"snapshot/TCG"}}}] if "head=snapshot:export-import" in sys.argv and not pathlib.Path(__file__).with_name("empty").exists() else []))
 """)
