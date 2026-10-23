@@ -362,8 +362,11 @@ are never combined.
 On other branches, the expanded desktop sidebar shows the newest associated
 GitHub PR by creation date, matching the exact head repository and branch across all states. Linked
 worktrees are independent. Open PR numbers are green, draft gray, merged purple,
-and closed red. Checks show ✅ passed, ❌ failed, or 🟡 pending. Merged PRs and PRs
-without actionable checks omit the check icon.
+and closed red. Checks use the same remote branch history and selection rules as
+default-branch CI, querying the PR head repository and tracked branch. If the
+remote branch was deleted, checks fall back to the PR's head commit. Checks show
+✅ passed, ❌ failed, or 🟡 pending. Merged PRs and branches without actionable
+checks omit the check icon.
 
 ```sh
 herdr plugin action invoke herdrpp.refresh

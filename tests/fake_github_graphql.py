@@ -1,7 +1,13 @@
 """Translate existing GitHub fixtures into aliased status-batch responses."""
 
 
-def status_response(args, details, history):
+def history_for_pr(details):
+    return {"ref": {"target": {"history": {"nodes": [
+        node["commit"] for node in details.get("commits", {}).get("nodes", [])
+    ]}}}}
+
+
+def status_response(args, details, history, branch_history=None):
     fields = dict(
         argument.split("=", 1)
         for index, argument in enumerate(args)
@@ -22,6 +28,11 @@ def status_response(args, details, history):
                     }} if checks is not None else None,
                 }}]}
             data[f"target{index}"] = {"pullRequest": value}
+            if f"ciOwner{index}" in fields:
+                data[f"ci{index}"] = (
+                    branch_history["data"]["repository"] if branch_history is not None
+                    else history_for_pr(value)
+                )
         else:
             data[f"target{index}"] = history["data"]["repository"]
     return {"data": data}
