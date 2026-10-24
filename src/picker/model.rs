@@ -72,6 +72,27 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// Native create/open requests require the unique repository parent.
+    pub fn worktree_source(&self, workspace_id: &str) -> Option<&str> {
+        let workspace = self
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == workspace_id)?;
+        if workspace.repository().is_some_and(|(_, linked)| linked) {
+            self.workspace_groups()
+                .into_iter()
+                .find(|group| {
+                    group
+                        .worktrees
+                        .iter()
+                        .any(|child| child.workspace_id == workspace_id)
+                })
+                .map(|group| group.root.workspace_id.as_str())
+        } else {
+            Some(workspace.workspace_id.as_str())
+        }
+    }
+
     pub fn workspace_groups(&self) -> Vec<WorkspaceGroup<'_>> {
         let mut ordered: Vec<_> = self.workspaces.iter().collect();
         ordered.sort_by_key(|workspace| workspace.number);

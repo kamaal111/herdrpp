@@ -37,9 +37,11 @@ CASES = (
     "empty-snapshot", "loading", "tiny-terminal", "tab-cycling",
     "tasks-search", "tasks-diagnostics",
     "palette-popup", "palette-search", "palette-empty", "palette-rename", "palette-create", "palette-confirm", "palette-narrow", "palette-loading",
+    "palette-branches", "palette-worktree-name", "palette-branch-warning",
 )
 CONTROLLED = {"agent-status-dots", "agent-status-symbols", "tasks-search", "tasks-diagnostics", "empty-snapshot", "loading", "tiny-terminal",
-              "palette-search", "palette-empty", "palette-rename", "palette-create", "palette-confirm", "palette-narrow", "palette-loading"}
+              "palette-search", "palette-empty", "palette-rename", "palette-create", "palette-confirm", "palette-narrow", "palette-loading",
+              "palette-branches", "palette-worktree-name", "palette-branch-warning"}
 SHOWCASE_PRS = (
     (95, "open-passing", "OPEN", False, "SUCCESS", "pr_open", "238636", "✅"),
     (96, "open-failing", "OPEN", False, "FAILURE", "pr_open", "238636", "❌"),
@@ -245,6 +247,8 @@ auto_switch = false
 [terminal]
 default_shell = "/bin/sh"
 shell_mode = "non_login"
+[worktrees]
+directory = "{self.directory / 'created-worktrees'}"
 [update]
 version_check = false
 manifest_check = false
@@ -481,9 +485,9 @@ else:
             self.api("plugin", "action", "invoke", "herdrpp.commands")
             self.client.wait("Search commands", "Command Palette")
             if self.case == "showcase-commands":
-                self.client.send(b"\x0e" * 21 + b"\x10" * 7)
+                self.client.send(b"\x0e" * 23 + b"\x10" * 7)
                 grid = self.client.wait(
-                    "› Run workspace tasks", "herdrpp.tasks", "New Tab", "Rename Tab",
+                    "› Run workspace tasks", "herdrpp.tasks", "New Worktree", "Rename Tab",
                     "Search Workspaces", "Split Pane Right", "Enter Run")
             else:
                 self.client.send(b"spl rgt")
@@ -955,6 +959,53 @@ class FocusTests(unittest.TestCase):
         after = self.finish(b"\x1b", self.origin)
         self.wait_command()
         self.assertEqual(focus_state(after), self.origin)
+
+    def test_command_palette_creates_native_grouped_worktree_from_selected_base(self):
+        root = next(workspace for workspace in self.initial["workspaces"] if workspace["workspace_id"] == self.origin[0])
+        branch = self.session.run("git", "-C", str(self.session.directory / "herdrpp"), "branch", "--show-current").strip()
+        self.open_commands("New Worktree")
+        self.session.client.send(b"\r")
+        self.session.client.wait("Choose base branch", f"› {branch}")
+        self.session.client.send(b"\r")
+        self.session.client.wait("New branch name", f"Base: {branch}")
+        self.session.client.send(b"feature/palette-new\r")
+        self.wait_command()
+        after = self.snapshot()
+        created = next(workspace for workspace in after["workspaces"] if workspace["workspace_id"] == after["focused_workspace_id"])
+        self.assertNotEqual(created["workspace_id"], self.origin[0])
+        self.assertTrue(created["worktree"]["is_linked_worktree"])
+        self.assertEqual(created["worktree"]["repo_key"], root["worktree"]["repo_key"])
+        self.assertTrue(Path(created["worktree"]["checkout_path"]).is_relative_to(self.session.directory / "created-worktrees"))
+        self.assertEqual(self.session.run("git", "-C", created["worktree"]["checkout_path"], "branch", "--show-current").strip(), "feature/palette-new")
+
+    def test_command_palette_from_linked_worktree_opens_existing_branch_in_same_group(self):
+        source = next(workspace for workspace in self.initial["workspaces"] if workspace["label"] == "feature/search")
+        self.session.run("git", "-C", str(self.session.directory / "herdrpp"), "branch", "feature/existing")
+        self.session.api("workspace", "focus", source["workspace_id"])
+        self.open_commands("Add Existing Branch as Worktree")
+        self.session.client.send(b"\r")
+        self.session.client.wait("Choose existing branch")
+        self.session.client.send(b"feature/existing")
+        self.session.client.wait("feature/existing", "1 results")
+        self.session.client.send(b"\r")
+        self.wait_command()
+        after = self.snapshot()
+        created = next(workspace for workspace in after["workspaces"] if workspace["workspace_id"] == after["focused_workspace_id"])
+        self.assertEqual(created["worktree"]["repo_key"], source["worktree"]["repo_key"])
+        self.assertNotEqual(created["workspace_id"], source["workspace_id"])
+
+    def test_command_palette_reuses_an_already_open_worktree(self):
+        target = next(workspace for workspace in self.initial["workspaces"] if workspace["label"] == "feature/search")
+        self.open_commands("Add Existing Branch as Worktree")
+        self.session.client.send(b"\r")
+        self.session.client.wait("Choose existing branch")
+        self.session.client.send(b"feature/search")
+        self.session.client.wait("feature/search", "1 results")
+        self.session.client.send(b"\r")
+        self.wait_command()
+        after = self.snapshot()
+        self.assertEqual(after["focused_workspace_id"], target["workspace_id"])
+        self.assertEqual(len(after["workspaces"]), len(self.initial["workspaces"]))
 
     def test_command_palette_cancel_restores_original_focus_and_layout(self):
         self.open_commands("split right")

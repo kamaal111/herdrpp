@@ -76,6 +76,16 @@ impl Direction {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Command {
+    ChooseWorktree {
+        root: std::path::PathBuf,
+        new: bool,
+        invocation_branch: String,
+    },
+    WorktreeBranch {
+        root: std::path::PathBuf,
+        branch: super::worktree::Branch,
+        new: bool,
+    },
     Task {
         task: crate::tasks::config::Task,
         root: std::path::PathBuf,
@@ -113,6 +123,8 @@ impl Item {
     pub fn fields(&self) -> [&str; 4] {
         if matches!(self.command, Command::Task { .. }) {
             ["", "", "", &self.title]
+        } else if matches!(self.command, Command::WorktreeBranch { .. }) {
+            [&self.source, "", "", &self.title]
         } else {
             [&self.source, &self.id, &self.description, &self.title]
         }

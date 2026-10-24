@@ -21,6 +21,7 @@ pub struct Selection {
 pub enum Action {
     Continue,
     Cancel,
+    Abort,
     Execute(Selection),
 }
 
@@ -38,6 +39,8 @@ pub enum Mode {
 }
 
 pub struct App {
+    pub view: super::cli::View,
+    pub prompt_error: Option<String>,
     pub tasks: bool,
     pub diagnostics_offset: u16,
     pub diagnostics_max: u16,
@@ -68,6 +71,8 @@ impl App {
         warning: Option<String>,
     ) -> Self {
         let mut app = Self {
+            view: super::cli::View::Commands,
+            prompt_error: None,
             tasks: false,
             diagnostics_offset: 0,
             diagnostics_max: 0,
@@ -151,6 +156,15 @@ impl App {
             Mode::Name {
                 item, input, error, ..
             } => {
+                if let Command::WorktreeBranch {
+                    root, new: true, ..
+                } = &self.items[*item].command
+                    && let Err(reason) = super::worktree::validate_name(root, input.text())
+                {
+                    *error = true;
+                    self.prompt_error = Some(reason.to_string());
+                    return Action::Continue;
+                }
                 if matches!(self.items[*item].command, Command::Rename(_))
                     && input.text().trim().is_empty()
                 {
@@ -177,6 +191,16 @@ impl App {
                     return Action::Continue;
                 };
                 match self.items[item].command {
+                    Command::WorktreeBranch { new: true, .. } => {
+                        self.mode = Mode::Name {
+                            item,
+                            input: TextInput::default(),
+                            error: false,
+                        };
+                        self.prompt_error = None;
+                        self.clear_hits();
+                        Action::Continue
+                    }
                     Command::Rename(scope) | Command::Create(scope) => {
                         let creating = matches!(self.items[item].command, Command::Create(_));
                         self.mode = Mode::Name {
@@ -219,6 +243,7 @@ impl App {
             Mode::Name { input, error, .. } => {
                 if input.handle(event) == InputChange::Edited {
                     *error = false;
+                    self.prompt_error = None;
                 }
             }
             Mode::Confirm { .. } => {}
@@ -270,7 +295,13 @@ impl App {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
-                    KeyCode::Char('c') if ctrl => return Action::Cancel,
+                    KeyCode::Char('c') if ctrl => {
+                        return if self.view.branches() {
+                            Action::Abort
+                        } else {
+                            Action::Cancel
+                        };
+                    }
                     KeyCode::Esc => return self.cancel(),
                     KeyCode::Enter => return self.activate(),
                     KeyCode::Up | KeyCode::Char('p')

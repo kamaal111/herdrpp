@@ -102,6 +102,49 @@ fn git(directory: &Path, args: &[&str], cancelled: &AtomicBool) -> Result<Option
     ))
 }
 
+pub const GITBUTLER_WORKSPACE: &str = "gitbutler/workspace";
+
+pub fn effective_branch<'a>(branch: &'a str, default_branch: &'a str) -> &'a str {
+    if branch == GITBUTLER_WORKSPACE {
+        default_branch
+    } else {
+        branch
+    }
+}
+
+/// Select the tracking remote, or the sole remote; never guess between remotes.
+pub fn remote_default_branch(directory: &Path, cancelled: &AtomicBool) -> Result<(String, String)> {
+    let branch = git(directory, &["branch", "--show-current"], cancelled)?.unwrap_or_default();
+    let tracking = git(
+        directory,
+        &["config", "--get", &format!("branch.{branch}.remote")],
+        cancelled,
+    )?;
+    let remotes = git(directory, &["remote"], cancelled)?.unwrap_or_default();
+    let names: Vec<_> = remotes.lines().collect();
+    let remote = match tracking.as_deref() {
+        Some(name) if names.contains(&name) => name,
+        Some(_) => anyhow::bail!("tracking remote is unavailable"),
+        None if names.len() == 1 => names[0],
+        _ => anyhow::bail!("repository default branch is ambiguous or unavailable"),
+    };
+    let reference = git(
+        directory,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            &format!("refs/remotes/{remote}/HEAD"),
+        ],
+        cancelled,
+    )?
+    .context("remote has no advertised default branch")?;
+    let name = reference
+        .strip_prefix(&format!("refs/remotes/{remote}/"))
+        .filter(|name| !name.is_empty())
+        .context("invalid remote default branch")?;
+    Ok((remote.into(), name.into()))
+}
+
 pub fn repository_url(directory: &Path, cancelled: &AtomicBool) -> Result<Option<String>> {
     if !directory.is_absolute() || !directory.is_dir() {
         return Ok(None);

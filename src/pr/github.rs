@@ -7,6 +7,7 @@ use serde::Deserialize;
 use std::{
     path::{Path, PathBuf},
     process::Command,
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
@@ -449,17 +450,88 @@ fn resolve_repository_while(
     checkout: &Checkout,
     should_continue: &mut impl FnMut() -> Result<bool>,
 ) -> Result<(Checkout, bool, String)> {
+    let (mut resolved, default_branch_name, base_repository) =
+        repository_metadata_while(checkout, should_continue, &AtomicBool::new(false))?;
+    if crate::repository::effective_branch(&checkout.branch, &default_branch_name)
+        != checkout.branch
+    {
+        resolved.head_branch = default_branch_name.clone();
+    }
+    let default_branch = default_branch_name == resolved.head_branch;
+    Ok((resolved, default_branch, base_repository))
+}
+
+pub fn default_branch(directory: &Path, cancelled: &AtomicBool) -> Result<String> {
+    if let Some(checkout) = checkout(directory)? {
+        return repository_metadata_while(
+            &checkout,
+            &mut || Ok(!cancelled.load(Ordering::Relaxed)),
+            cancelled,
+        )
+        .map(|(_, name, _)| name);
+    }
+    crate::repository::remote_default_branch(directory, cancelled).map(|(_, name)| name)
+}
+
+fn repository_metadata(
+    checkout: &Checkout,
+    name: Option<&str>,
+    cancelled: &AtomicBool,
+) -> Result<Repository> {
+    let mut command = gh(checkout);
+    command.args(["repo", "view"]);
+    if let Some(name) = name {
+        command.arg(name);
+    }
+    command.args(["--json", "nameWithOwner,url,defaultBranchRef"]);
+    let result = (|| {
+        let output = crate::command::run_cancellable(
+            &mut command,
+            Duration::from_secs(15),
+            4 * 1024 * 1024,
+            cancelled,
+            "GitHub repository lookup",
+        )?;
+        ensure!(
+            output.status.success(),
+            "GitHub repository lookup failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        Ok(output.stdout)
+    })();
+    match result {
+        Ok(bytes) => serde_json::from_slice(&bytes).context("resolve GitHub repository"),
+        Err(error) => {
+            ensure!(
+                !cancelled.load(Ordering::Relaxed),
+                "repository lookup cancelled"
+            );
+            let (remote_name, default_name) =
+                crate::repository::remote_default_branch(&checkout.root, cancelled)
+                    .with_context(|| format!("GitHub metadata unavailable: {error:#}"))?;
+            let url = git(&checkout.root, &["remote", "get-url", "--", &remote_name])?;
+            let remote =
+                parse_remote(&url).context("fallback remote is not a GitHub repository")?;
+            ensure!(
+                name.is_none_or(|name| name == format!("{}/{}", remote.host, remote.repository)),
+                "fallback repository does not match requested repository"
+            );
+            Ok(Repository {
+                name_with_owner: remote.repository.clone(),
+                url: format!("https://{}/{}", remote.host, remote.repository),
+                default_branch_ref: Some(BranchRef { name: default_name }),
+            })
+        }
+    }
+}
+
+fn repository_metadata_while(
+    checkout: &Checkout,
+    should_continue: &mut impl FnMut() -> Result<bool>,
+    cancelled: &AtomicBool,
+) -> Result<(Checkout, String, String)> {
     ensure!(should_continue()?, "GitHub status lookup stopped");
-    let repository: Repository = serde_json::from_slice(&run(
-        gh(checkout).args([
-            "repo",
-            "view",
-            "--json",
-            "nameWithOwner,url,defaultBranchRef",
-        ]),
-        Duration::from_secs(15),
-    )?)
-    .context("resolve GitHub base repository")?;
+    let repository = repository_metadata(checkout, None, cancelled)?;
     let base = repository.remote()?;
     let mut resolved = checkout.clone();
     if resolved.head_repo.is_empty() {
@@ -484,17 +556,7 @@ fn resolve_repository_while(
     } else {
         ensure!(should_continue()?, "GitHub status lookup stopped");
         let name = format!("{}/{}", checkout.host, checkout.head_repo);
-        let head: Repository = serde_json::from_slice(&run(
-            gh(checkout).args([
-                "repo",
-                "view",
-                &name,
-                "--json",
-                "nameWithOwner,url,defaultBranchRef",
-            ]),
-            Duration::from_secs(15),
-        )?)
-        .context("resolve GitHub head repository")?;
+        let head = repository_metadata(checkout, Some(&name), cancelled)?;
         let remote = head.remote()?;
         ensure!(
             remote.host.eq_ignore_ascii_case(&checkout.host)
@@ -507,11 +569,7 @@ fn resolve_repository_while(
         .default_branch_ref
         .context("GitHub repository has no default branch")?
         .name;
-    if checkout.branch == "gitbutler/workspace" {
-        resolved.head_branch = default_branch_name.clone();
-    }
-    let default_branch = default_branch_name == resolved.head_branch;
-    Ok((resolved, default_branch, base.repository))
+    Ok((resolved, default_branch_name, base.repository))
 }
 
 impl Repository {
