@@ -38,6 +38,9 @@ if kind == "herdr":
     else:
         sys.exit(11)
 else:
+    if args[:2] == ["repo", "view"] and (root / "repo-fail").exists():
+        print("GitHub repository metadata unavailable", file=sys.stderr)
+        sys.exit(1)
     if (root / "fail").exists():
         print("GitHub unavailable", file=sys.stderr)
         sys.exit(1)
@@ -1083,6 +1086,17 @@ class TestPluginSmoke:
         queries = [args for kind, args in self.calls() if kind == "gh" and args[:2] == ["api", "graphql"]]
         assert len(queries) == 1
         assert "branch0=refs/heads/trunk" in queries[0]
+
+    def test_gitbutler_workspace_uses_shared_remote_head_fallback_when_repo_lookup_fails(self):
+        self.set_default_branch()
+        self.git("update-ref", "refs/remotes/company/trunk", "HEAD")
+        self.git("symbolic-ref", "refs/remotes/company/HEAD", "refs/remotes/company/trunk")
+        self.git("branch", "-m", "gitbutler/workspace")
+        (self.root / "repo-fail").touch()
+        self.set_history([[{"__typename":"StatusContext", "state":"SUCCESS"}]])
+        self.run_plugin("refresh")
+        assert "ci_passed=CI ✅" in self.reports()[0]
+        assert "branch0=refs/heads/trunk" in self.status_queries()[0]
 
     def test_gitbutler_workspace_check_pr(self):
         self.set_default_branch()

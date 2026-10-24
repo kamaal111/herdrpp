@@ -27,8 +27,36 @@ use std::{
 
 const LIMIT: u64 = 4 * 1024 * 1024;
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub enum View {
+    #[default]
+    Commands,
+    ExistingBranches {
+        root: PathBuf,
+    },
+    BaseBranches {
+        root: PathBuf,
+        invocation_branch: String,
+    },
+}
+
+impl View {
+    pub fn branches(&self) -> bool {
+        !matches!(self, Self::Commands)
+    }
+    pub fn title(&self) -> &'static str {
+        match self {
+            Self::Commands => "Search commands",
+            Self::ExistingBranches { .. } => "Choose existing branch",
+            Self::BaseBranches { .. } => "Choose base branch",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Catalog {
+    #[serde(default)]
+    pub view: View,
     #[serde(default)]
     pub tasks: bool,
     #[serde(default)]
@@ -71,6 +99,14 @@ pub fn validate_selection<'a>(items: &'a [Item], selection: &Selection) -> Resul
         .context("unknown palette command")?
         .command;
     match command {
+        Command::WorktreeBranch { new: true, .. } => {
+            ensure!(
+                selection.input.as_ref().is_some_and(
+                    |text| !text.trim().is_empty() && !text.chars().any(char::is_control)
+                ) && !selection.confirmed,
+                "new worktree requires a branch name"
+            )
+        }
         Command::Close(_) => ensure!(
             selection.confirmed && selection.input.is_none(),
             "closing requires confirmation"
@@ -105,10 +141,33 @@ fn load(
     cancelled: &AtomicBool,
     repo_directory: Option<&Path>,
 ) -> Catalog {
-    if let Some(directory) = repo_directory
-        && let Ok(Some(item)) = super::repository::item(directory, cancelled)
-    {
-        catalog.items.push(item);
+    if let View::ExistingBranches { root } | View::BaseBranches { root, .. } = &catalog.view {
+        let new = matches!(catalog.view, View::BaseBranches { .. });
+        let invocation_branch = match &catalog.view {
+            View::BaseBranches {
+                invocation_branch, ..
+            } => Some(invocation_branch.as_str()),
+            _ => None,
+        };
+        match super::worktree::load(root, new, invocation_branch, cancelled) {
+            Ok((items, warning)) => {
+                catalog.items = items;
+                catalog.warning = warning;
+            }
+            Err(error) => {
+                catalog.items.clear();
+                catalog.warning = Some(format!("Cannot load branches: {error:#}"));
+            }
+        }
+        return catalog;
+    }
+    if let Some(directory) = repo_directory {
+        if let Ok(Some(item)) = super::repository::item(directory, cancelled) {
+            catalog.items.push(item);
+        }
+        if let Ok(root) = super::worktree::root(directory, cancelled) {
+            catalog.items.extend(super::worktree::actions(&root));
+        }
     }
     catalog.naming.resolve_workspace_suggestion(cancelled);
     let plugins = (|| {
@@ -124,6 +183,8 @@ fn load(
         Err(error) => Some(format!("Plugin commands unavailable: {error:#}")),
     };
     catalog::sort(&mut catalog.items);
+    let mut ids = std::collections::HashSet::new();
+    catalog.items.retain(|item| ids.insert(item.id.clone()));
     catalog
 }
 
@@ -157,7 +218,10 @@ fn owner(
                 {
                     match history::state_directory().and_then(|directory| History::load(&directory))
                     {
-                        Ok(history) => loaded.recent_ids = history.recent_ids(&loaded.items),
+                        Ok(history) if !loaded.view.branches() => {
+                            loaded.recent_ids = history.recent_ids(&loaded.items)
+                        }
+                        Ok(_) => {}
                         Err(error) => {
                             eprintln!("herdr++: palette usage history unavailable: {error:#}")
                         }
@@ -252,6 +316,7 @@ pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
     }
     let repo_directory = super::repository::directory_from_snapshot(&snapshot, &context);
     let initial_catalog = Catalog {
+        view: View::Commands,
         tasks,
         recent_ids: vec![],
         context: context.clone(),
@@ -259,49 +324,89 @@ pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
         items,
         warning: None,
     };
-    let directory = tempfile::tempdir()?;
-    let request_env = format!("HERDRPP_PALETTE_REQUEST={}", directory.path().display());
-    api.open_popup(
-        if tasks {
-            "task-palette"
-        } else {
-            "command-palette"
-        },
-        Some(&request_env),
-    )?;
-    let cancelled = AtomicBool::new(false);
-    let selected = owner(
-        api,
-        directory.path(),
-        &context,
-        initial_catalog,
-        &cancelled,
-        tasks,
-        repo_directory.as_deref(),
-    )?;
-    if let Some((catalog, selection)) = selected {
-        let command = validate_selection(&catalog.items, &selection)?;
-        let key = catalog
-            .items
-            .iter()
-            .find(|item| item.id == selection.id)
-            .map(UsageKey::for_item)
-            .context("unknown palette command")?;
-        api::execute(
-            api,
-            &socket,
-            command,
-            &context,
-            &catalog.naming,
-            selection.input.as_deref(),
+    let mut next_catalog = initial_catalog;
+    let mut return_catalog = None;
+    let mut workflow_key = None;
+    loop {
+        let directory = tempfile::tempdir()?;
+        write_json(&directory.path().join("view.json"), &next_catalog.view)?;
+        let request_env = format!("HERDRPP_PALETTE_REQUEST={}", directory.path().display());
+        api.open_popup(
+            if tasks {
+                "task-palette"
+            } else {
+                "command-palette"
+            },
+            Some(&request_env),
         )?;
-        if let Err(error) =
-            history::state_directory().and_then(|directory| History::record(&directory, key))
-        {
-            eprintln!("herdr++: cannot save palette usage history: {error:#}");
+        let cancelled = AtomicBool::new(false);
+        let selected = owner(
+            api,
+            directory.path(),
+            &context,
+            next_catalog,
+            &cancelled,
+            tasks,
+            repo_directory.as_deref(),
+        )?;
+        if directory.path().join("abort.json").exists() {
+            return Ok(());
+        }
+        if let Some((catalog, selection)) = selected {
+            let command = validate_selection(&catalog.items, &selection)?;
+            let key = catalog
+                .items
+                .iter()
+                .find(|item| item.id == selection.id)
+                .map(UsageKey::for_item)
+                .context("unknown palette command")?;
+            if let Command::ChooseWorktree {
+                root,
+                new,
+                invocation_branch,
+            } = command
+            {
+                next_catalog = Catalog {
+                    view: if *new {
+                        View::BaseBranches {
+                            root: root.clone(),
+                            invocation_branch: invocation_branch.clone(),
+                        }
+                    } else {
+                        View::ExistingBranches { root: root.clone() }
+                    },
+                    tasks: false,
+                    recent_ids: vec![],
+                    context: context.clone(),
+                    naming: catalog.naming.clone(),
+                    items: vec![],
+                    warning: None,
+                };
+                workflow_key = Some(key);
+                return_catalog = Some(catalog);
+                continue;
+            }
+            api::execute(
+                api,
+                &socket,
+                command,
+                &context,
+                &catalog.naming,
+                selection.input.as_deref(),
+            )?;
+            if let Err(error) = history::state_directory().and_then(|directory| {
+                History::record(&directory, workflow_key.take().unwrap_or(key))
+            }) {
+                eprintln!("herdr++: cannot save palette usage history: {error:#}");
+            }
+            return Ok(());
+        } else if let Some(catalog) = return_catalog.take() {
+            next_catalog = catalog;
+            workflow_key = None;
+        } else {
+            return Ok(());
         }
     }
-    Ok(())
 }
 
 pub fn pick() -> Result<()> {

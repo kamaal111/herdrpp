@@ -9,8 +9,17 @@ fn main() -> Result<()> {
     let (width, height) = match case.as_str() {
         "empty-snapshot" | "loading" | "agent-status-dots" | "agent-status-symbols" => (109, 20),
         "tiny-terminal" => (6, 1),
-        "tasks-search" | "tasks-diagnostics" | "palette-search" | "palette-empty"
-        | "palette-rename" | "palette-create" | "palette-confirm" | "palette-loading" => (109, 20),
+        "tasks-search"
+        | "tasks-diagnostics"
+        | "palette-search"
+        | "palette-empty"
+        | "palette-rename"
+        | "palette-create"
+        | "palette-confirm"
+        | "palette-loading"
+        | "palette-branches"
+        | "palette-worktree-name"
+        | "palette-branch-warning" => (109, 20),
         "palette-narrow" => (32, 12),
         _ => bail!("unknown controlled snapshot: {case}"),
     };
@@ -130,6 +139,58 @@ fn main() -> Result<()> {
             palette.items.clear();
             palette.set_query(String::new());
             palette.warning = Some("Fix /project/.herdr/tasks.json\n\nTask 1 (\"test\"), new_tab: expected true or false, received string. Remove the quotes.\n\nTask 2 (\"build\"), command: expected a nonblank string; add a quoted string value.\n\nSave the file and reopen tasks to reload.".into());
+        }
+    }
+    if matches!(
+        case.as_str(),
+        "palette-branches" | "palette-worktree-name" | "palette-branch-warning"
+    ) {
+        use herdrpp::palette::{
+            cli::View,
+            worktree::{Branch, branch_items},
+        };
+        let branches = [
+            Branch {
+                reference: "refs/heads/main".into(),
+                name: "main".into(),
+                remote: None,
+            },
+            Branch {
+                reference: "refs/heads/feature/palette".into(),
+                name: "feature/palette".into(),
+                remote: None,
+            },
+            Branch {
+                reference: "refs/remotes/origin/feature/report".into(),
+                name: "feature/report".into(),
+                remote: Some("origin".into()),
+            },
+        ];
+        palette.items = branch_items(
+            std::path::Path::new("/project"),
+            &branches,
+            true,
+            Some("feature/palette"),
+        );
+        palette.view = View::BaseBranches {
+            root: "/project".into(),
+            invocation_branch: "feature/palette".into(),
+        };
+        palette.set_query(String::new());
+        if case == "palette-worktree-name" {
+            palette.handle(terminal_input::event::Event::Key(
+                terminal_input::event::KeyEvent::new(
+                    terminal_input::event::KeyCode::Enter,
+                    terminal_input::event::KeyModifiers::NONE,
+                ),
+            ));
+            palette.handle(terminal_input::event::Event::Paste(
+                "feature/new-worktree".into(),
+            ));
+        }
+        if case == "palette-branch-warning" {
+            palette.warning =
+                Some("Fetch origin failed: remote unavailable; using known branches".into());
         }
     }
     terminal.draw(|frame| {

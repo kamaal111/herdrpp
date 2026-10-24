@@ -79,7 +79,7 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 if app.tasks {
                     "Search tasks"
                 } else {
-                    "Search commands"
+                    app.view.title()
                 },
                 app.results.len(),
             );
@@ -92,6 +92,8 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                     palette,
                     if app.tasks {
                         "No matching tasks"
+                    } else if app.view.branches() {
+                        "No matching branches"
                     } else {
                         "No matching commands"
                     },
@@ -140,6 +142,8 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
             frame.render_widget(
                 Paragraph::new(if app.tasks {
                     "↑↓/Ctrl+P,N Tasks  Enter Run"
+                } else if app.view.branches() {
+                    "↑↓/Ctrl+P,N Branches  Enter Select"
                 } else {
                     "↑↓/Ctrl+P,N Commands  Enter Run"
                 })
@@ -183,7 +187,14 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
         Mode::Name { item, input, error } => {
             view::render_name_input(frame, chunks[0], chunks[1], palette, input);
             let message = if *error {
-                "Enter a nonblank name".to_string()
+                app.prompt_error
+                    .clone()
+                    .unwrap_or_else(|| "Enter a nonblank name".to_string())
+            } else if matches!(
+                app.items[*item].command,
+                super::catalog::Command::WorktreeBranch { .. }
+            ) {
+                format!("New branch name · Base: {}", app.items[*item].title)
             } else {
                 app.items[*item].title.clone()
             };
@@ -193,7 +204,11 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
             );
             frame.render_widget(
                 Paragraph::new(
-                    if matches!(app.items[*item].command, super::catalog::Command::Create(_)) {
+                    if matches!(
+                        app.items[*item].command,
+                        super::catalog::Command::Create(_)
+                            | super::catalog::Command::WorktreeBranch { .. }
+                    ) {
                         "Enter Create  Esc Back"
                     } else {
                         "Enter Save  Esc Back"
@@ -244,6 +259,11 @@ pub fn run(directory: &Path, theme: Theme) -> Result<Option<Selection>> {
 
 pub fn run_mode(directory: &Path, mut theme: Theme, tasks: bool) -> Result<Option<Selection>> {
     let (_screen, mut terminal) = Screen::enter(theme.auto_switch())?;
+    let view: super::cli::View = if directory.join("view.json").exists() {
+        read_json(&directory.join("view.json"))?
+    } else {
+        super::cli::View::Commands
+    };
     let mut pending = Vec::new();
     let catalog: Catalog = loop {
         anyhow::ensure!(directory.exists(), "command palette owner exited");
@@ -254,6 +274,8 @@ pub fn run_mode(directory: &Path, mut theme: Theme, tasks: bool) -> Result<Optio
         terminal.draw(|frame| {
             cancel_area = if tasks {
                 view::render_loading(frame, frame.area(), theme.palette(), "Loading tasks…")
+            } else if view.branches() {
+                view::render_loading(frame, frame.area(), theme.palette(), "Fetching branches…")
             } else {
                 render_loading(frame, theme.palette())
             };
@@ -267,6 +289,9 @@ pub fn run_mode(directory: &Path, mut theme: Theme, tasks: bool) -> Result<Optio
                             || (key.code == KeyCode::Char('c')
                                 && key.modifiers.contains(KeyModifiers::CONTROL))) =>
                 {
+                    if key.code == KeyCode::Char('c') {
+                        super::cli::write_json(&directory.join("abort.json"), &true)?;
+                    }
                     return Ok(None);
                 }
                 Event::Mouse(mouse)
@@ -289,10 +314,15 @@ pub fn run_mode(directory: &Path, mut theme: Theme, tasks: bool) -> Result<Optio
         catalog.warning,
     );
     app.tasks = catalog.tasks;
+    app.view = catalog.view;
     app.set_recent_ids(catalog.recent_ids);
     for event in pending {
         match app.handle(event) {
             Action::Cancel => return Ok(None),
+            Action::Abort => {
+                super::cli::write_json(&directory.join("abort.json"), &true)?;
+                return Ok(None);
+            }
             Action::Execute(selection) => return Ok(Some(selection)),
             Action::Continue => {}
         }
@@ -301,6 +331,10 @@ pub fn run_mode(directory: &Path, mut theme: Theme, tasks: bool) -> Result<Optio
         terminal.draw(|frame| render(frame, &mut app))?;
         match app.handle(event::read()?) {
             Action::Cancel => return Ok(None),
+            Action::Abort => {
+                super::cli::write_json(&directory.join("abort.json"), &true)?;
+                return Ok(None);
+            }
             Action::Execute(selection) => return Ok(Some(selection)),
             Action::Continue => {}
         }

@@ -34,7 +34,8 @@ if args == ["api", "snapshot"]:
         result["snapshot"]["tabs"] = []
 elif args[:3] == ["plugin", "pane", "open"] and "--env" in args:
     request = args[args.index("--env") + 1].split("=", 1)[1]
-    (root / "request").write_text(request)
+    (root / "request-next").write_text(request)
+    (root / "request-next").replace(root / "request")
     result = {"type":"ok"}
 elif args == ["plugin", "list", "--json"]:
     if os.environ.get("PALETTE_TEST_WAIT"):
@@ -90,11 +91,17 @@ class PaletteOwnerHarness:
         listener.settimeout(8)
 
         def serve():
-            with listener.accept()[0] as connection:
-                with connection.makefile("rb") as stream:
-                    request = json.loads(stream.readline())
-                requests.append(request)
-                connection.sendall((json.dumps({"id": request["id"], "result": {"type": "ok"}}) + "\n").encode())
+            while True:
+                with listener.accept()[0] as connection:
+                    with connection.makefile("rb") as stream:
+                        request = json.loads(stream.readline())
+                    requests.append(request)
+                    result = {"type": "ok"}
+                    if request["method"] == "worktree.list":
+                        result = {"type":"worktree_list", "worktrees":json.loads((self.root / "checkouts.json").read_text())}
+                    connection.sendall((json.dumps({"id": request["id"], "result": result}) + "\n").encode())
+                if request["method"] != "worktree.list":
+                    break
 
         worker = threading.Thread(target=serve, daemon=True)
         worker.start()
@@ -137,6 +144,95 @@ class PaletteOwnerHarness:
 
 
 class TestPaletteOwner(PaletteOwnerHarness):
+    def worktree_project(self):
+        project = self.root / "project"
+        project.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "feature/palette", str(project)], check=True)
+        subprocess.run(["git", "-C", str(project), "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "initial"], check=True)
+        (self.root / "snapshot.json").write_text(json.dumps({
+            "workspaces":[{"workspace_id":"w2", "active_tab_id":"w2:t7", "worktree":{"checkout_path":str(project)}}],
+            "tabs":[{"workspace_id":"w2", "tab_id":"w2:t7"}],
+            "panes":[{"workspace_id":"w2", "tab_id":"w2:t7", "pane_id":"w2:p8"}],
+            "layouts":[], "focused_workspace_id":"w9",
+        }))
+        (self.root / "checkouts.json").write_text("[]")
+        return project
+
+    def next_popup(self, directory, selection):
+        pending = directory / "selection-next.json"
+        pending.write_text(json.dumps(selection))
+        pending.replace(directory / "selection.json")
+        with pytest.raises(subprocess.TimeoutExpired):
+            self.process.communicate(timeout=0.15)
+        self.close_popup()
+        deadline = time.monotonic() + 8
+        while (self.root / "request").read_text() == str(directory):
+            assert time.monotonic() < deadline
+            time.sleep(0.02)
+        next_directory = Path((self.root / "request").read_text())
+        self.master, self.slave = pty.openpty()
+        terminal = next_directory / "terminal-next.json"
+        terminal.write_text(json.dumps(os.ttyname(self.slave)))
+        terminal.replace(next_directory / "terminal.json")
+        await_file(next_directory / "catalog.json")
+        return next_directory
+
+    def test_new_worktree_uses_original_workspace_and_records_only_completed_action(self, socket_requests):
+        self.worktree_project()
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_new", "input":None, "confirmed":False})
+        catalog = json.loads((chooser / "catalog.json").read_text())
+        assert catalog["items"][0]["title"] == "feature/palette"
+        assert not (self.root / "plugin-state/palette-history.json").exists()
+        self.select(chooser, {"id":"worktree:refs/heads/feature/palette", "input":"feature/worktree", "confirmed":False})
+        assert [request["method"] for request in socket_requests] == ["worktree.list", "worktree.create"]
+        assert socket_requests[1]["params"] == {"workspace_id":"w2", "branch":"feature/worktree", "base":"refs/heads/feature/palette", "focus":True}
+        assert json.loads((self.root / "plugin-state/palette-history.json").read_text()) == [{"Command":"herdr:worktree_new"}]
+
+    def test_existing_branch_reuses_native_checkout_without_creating_another(self, socket_requests):
+        self.worktree_project()
+        (self.root / "checkouts.json").write_text(json.dumps([{"branch":"feature/palette"}]))
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_existing", "input":None, "confirmed":False})
+        self.select(chooser, {"id":"worktree:refs/heads/feature/palette", "input":None, "confirmed":False})
+        assert [request["method"] for request in socket_requests] == ["worktree.list", "worktree.open"]
+        assert socket_requests[1]["params"] == {"workspace_id":"w2", "branch":"feature/palette", "focus":True}
+
+    def test_branch_cancellation_returns_to_commands_without_duplicate_actions_or_history(self):
+        self.worktree_project()
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_new", "input":None, "confirmed":False})
+        commands = self.next_popup(chooser, None)
+        items = json.loads((commands / "catalog.json").read_text())["items"]
+        assert len([item for item in items if item["id"] == "herdr:worktree_new"]) == 1
+        self.select(commands, None)
+        assert not (self.root / "plugin-state/palette-history.json").exists()
+
+    def test_branch_ctrl_c_aborts_the_whole_workflow(self):
+        self.worktree_project()
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_new", "input":None, "confirmed":False})
+        (chooser / "abort.json").write_text("true")
+        calls = self.select(chooser, None)
+        assert len([call for call in calls if call[:3] == ["plugin", "pane", "open"]]) == 2
+        assert not (self.root / "plugin-state/palette-history.json").exists()
+
+    def test_worktree_does_not_mutate_when_original_workspace_repository_changes(self):
+        self.worktree_project()
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_new", "input":None, "confirmed":False})
+        snapshot = json.loads((self.root / "snapshot.json").read_text())
+        snapshot["workspaces"][0]["worktree"]["checkout_path"] = str(self.root / "missing")
+        (self.root / "snapshot.json").write_text(json.dumps(snapshot))
+        pending = chooser / "selection-next.json"
+        pending.write_text(json.dumps({"id":"worktree:refs/heads/feature/palette", "input":"feature/new", "confirmed":False}))
+        pending.replace(chooser / "selection.json")
+        self.close_popup()
+        stdout, stderr = self.process.communicate(timeout=8)
+        assert self.process.returncode != 0, stdout
+        assert "cannot change to" in stderr
+        assert not (self.root / "plugin-state/palette-history.json").exists()
+
     def test_owner_waits_for_host_popup_teardown_before_exactly_one_original_pane_split(self):
         directory = self.start()
         calls = self.select(directory, {"id":"herdr:split_right", "input":None, "confirmed":False})

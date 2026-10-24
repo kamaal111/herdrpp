@@ -41,6 +41,23 @@ fn provenance_is_retained_and_focused_worktree_moves_its_whole_group_first() {
 }
 
 #[test]
+fn native_worktree_source_reuses_unique_picker_group_parent() {
+    let snapshot = snapshot(fixture());
+    assert_eq!(snapshot.worktree_source("w2"), Some("w1"));
+    assert_eq!(snapshot.worktree_source("w1"), Some("w1"));
+    assert_eq!(snapshot.worktree_source("w0"), Some("w0"));
+    assert_eq!(snapshot.worktree_source("missing"), None);
+}
+
+#[test]
+fn native_worktree_source_rejects_ambiguous_repository_parents() {
+    let mut fixture = fixture();
+    fixture["result"]["snapshot"]["workspaces"][0]["worktree"] =
+        fixture["result"]["snapshot"]["workspaces"][1]["worktree"].clone();
+    assert_eq!(snapshot(fixture).worktree_source("w2"), None);
+}
+
+#[test]
 fn unfocused_groups_and_worktree_siblings_keep_ui_order() {
     let mut fixture = fixture();
     fixture["result"]["snapshot"]["focused_workspace_id"] = json!("w0");
