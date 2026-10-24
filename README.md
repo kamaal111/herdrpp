@@ -221,6 +221,25 @@ and client-only actions such as Settings, Help, and Toggle Sidebar are outside
 this version's coverage. Discovery failures leave built-ins available with a
 warning; reopen to refresh the catalog.
 
+**New Worktree** and **Add Existing Branch as Worktree** appear for Git
+workspaces. Both target the workspace that opened the palette and use Herdr’s
+native checkout location and repository grouping. Successful actions focus the
+created or opened workspace.
+
+New Worktree first asks for a base branch, with the opening branch first and
+selected, then asks for a new branch name. When invoked from
+`gitbutler/workspace`, it selects the repository default instead. That branch
+is hidden from both choosers. Default-branch lookup shares the PR-status
+resolver, including its Git remote-HEAD fallback when GitHub metadata is
+unavailable; an unresolved default leaves an explanatory warning.
+
+Add Existing Branch as Worktree searches local and remote branches using the
+same fuzzy search and navigation as commands. Local branches take precedence;
+remote-only choices retain their remote name. Existing checkouts are opened
+or focused without duplication. Both choosers fetch configured remotes first;
+failed fetches show a warning and leave known refs usable. Escape goes back;
+Ctrl+C cancels the workflow. Opening the command palette alone does not fetch.
+
 **Open Repo** appears when the opening workspace has a detectable repository
 URL in its local Git remotes. It prefers the branch's tracking remote, then a
 sole eligible repository; ambiguous remotes leave the command hidden. It works

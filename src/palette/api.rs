@@ -84,6 +84,8 @@ pub fn arguments(command: &Command, context: &Context) -> Result<Option<Vec<Stri
     let required = |scope: Scope| scope.id(context).context("command target is unavailable");
     let args: Vec<String> = match command {
         Command::SearchWorkspaces
+        | Command::ChooseWorktree { .. }
+        | Command::WorktreeBranch { .. }
         | Command::Task { .. }
         | Command::ViewPullRequest { .. }
         | Command::OpenRepo { .. } => {
@@ -176,6 +178,12 @@ pub fn execute(
     let snapshot = api.raw_snapshot()?;
     validate_context(&snapshot, context)?;
     match command {
+        Command::ChooseWorktree { .. } => {
+            anyhow::bail!("worktree action requires branch selection")
+        }
+        Command::WorktreeBranch { root, branch, new } => {
+            super::worktree::execute(socket, root, branch, *new, context, input, &snapshot)
+        }
         Command::Task { task, root } => {
             crate::tasks::runner::execute(api, socket, context, root, task)
         }
