@@ -1,4 +1,6 @@
 //! Branch discovery and native Herdr worktree requests share one captured source.
+mod include;
+
 use super::{
     api,
     catalog::{Command, Context, Item},
@@ -354,6 +356,31 @@ pub fn execute(
         None
     };
     let (method, params) = request_for(root, branch, name, &source, &checkouts)?;
-    api::request(socket, &method, params)?;
+    let mut warnings = vec![];
+    let includes = if method == "worktree.create" {
+        match include::Include::prepare(root) {
+            Ok(includes) => includes,
+            Err(error) => {
+                warnings.push(format!("{error:#}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let response = api::request(socket, &method, params)?;
+    let destination = response["worktree"]["path"].as_str();
+    if let Some(includes) = includes {
+        match destination {
+            Some(destination) => warnings.extend(includes.copy(Path::new(destination))),
+            None => warnings.push("Herdr response has no destination worktree path".into()),
+        }
+    }
+    for warning in warnings {
+        eprintln!(
+            "herdr++: worktree created at {}; .worktreeinclude setup warning: {warning}",
+            destination.unwrap_or("an unknown checkout (missing Herdr path)")
+        );
+    }
     Ok(())
 }

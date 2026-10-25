@@ -99,7 +99,25 @@ class PaletteOwnerHarness:
                     result = {"type": "ok"}
                     if request["method"] == "worktree.list":
                         result = {"type":"worktree_list", "worktrees":json.loads((self.root / "checkouts.json").read_text())}
-                    connection.sendall((json.dumps({"id": request["id"], "result": result}) + "\n").encode())
+                    elif request["method"] == "worktree.create":
+                        source = Path(json.loads((self.root / "snapshot.json").read_text())["workspaces"][0]["worktree"]["checkout_path"])
+                        checkout = self.root / "checkout"
+                        branch = request["params"]["branch"]
+                        exists = subprocess.run(["git", "-C", str(source), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"]).returncode == 0
+                        args = ["git", "-C", str(source), "worktree", "add", "-q"]
+                        if exists:
+                            args.extend([str(checkout), branch])
+                        else:
+                            args.extend(["-b", branch, str(checkout), request["params"].get("base") or "HEAD"])
+                        if not (self.root / "create-error").exists():
+                            subprocess.run(args, check=True)
+                        result = {"type":"worktree_created", "worktree":{"path":str(checkout)}}
+                        if (self.root / "missing-path").exists():
+                            result = {"type":"worktree_created"}
+                    response = {"id": request["id"], "result": result}
+                    if (self.root / "create-error").exists() and request["method"] == "worktree.create":
+                        response = {"id":request["id"], "error":{"code":"worktree_create_failed", "message":"creation failed"}}
+                    connection.sendall((json.dumps(response) + "\n").encode())
                 if request["method"] != "worktree.list":
                     break
 
@@ -139,6 +157,7 @@ class PaletteOwnerHarness:
             self.process.communicate(timeout=0.15)
         self.close_popup()
         stdout, stderr = self.process.communicate(timeout=8)
+        self.stderr = stderr
         assert self.process.returncode == 0, (stdout, stderr)
         return [json.loads(line) for line in (self.root / "calls").read_text().splitlines()]
 
@@ -190,13 +209,122 @@ class TestPaletteOwner(PaletteOwnerHarness):
         assert json.loads((self.root / "plugin-state/palette-history.json").read_text()) == [{"Command":"herdr:worktree_new"}]
 
     def test_existing_branch_reuses_native_checkout_without_creating_another(self, socket_requests):
-        self.worktree_project()
+        project = self.worktree_project()
+        (project / ".gitignore").write_text(".env\n")
+        (project / ".worktreeinclude").write_text(".env\n")
+        (project / ".env").write_text("source\n")
+        (self.root / "checkout").mkdir()
         (self.root / "checkouts.json").write_text(json.dumps([{"branch":"feature/palette"}]))
         directory = self.start()
         chooser = self.next_popup(directory, {"id":"herdr:worktree_existing", "input":None, "confirmed":False})
         self.select(chooser, {"id":"worktree:refs/heads/feature/palette", "input":None, "confirmed":False})
         assert [request["method"] for request in socket_requests] == ["worktree.list", "worktree.open"]
         assert socket_requests[1]["params"] == {"workspace_id":"w2", "branch":"feature/palette", "focus":True}
+        assert not (self.root / "checkout/.env").exists()
+
+    def test_new_worktree_copies_only_selected_ignored_files(self, socket_requests):
+        project = self.worktree_project()
+        (project / ".gitignore").write_text(".env*\n")
+        (project / ".worktreeinclude").write_text(".env*\n!.env.production\nnotes.txt\n")
+        (project / ".env.local").write_text("MODE=local\n")
+        (project / ".env.production").write_text("MODE=production\n")
+        (project / "notes.txt").write_text("untracked\n")
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_new", "input":None, "confirmed":False})
+        self.select(chooser, {"id":"worktree:refs/heads/feature/palette", "input":"feature/include", "confirmed":False})
+        assert (self.root / "checkout/.env.local").read_text() == "MODE=local\n"
+        assert not (self.root / "checkout/.env.production").exists()
+        assert not (self.root / "checkout/notes.txt").exists()
+        assert json.loads((self.root / "plugin-state/palette-history.json").read_text()) == [{"Command":"herdr:worktree_new"}]
+
+    def test_add_existing_branch_copies_included_files(self, socket_requests):
+        project = self.worktree_project()
+        subprocess.run(["git", "-C", str(project), "branch", "feature/existing"], check=True)
+        (project / ".gitignore").write_text(".env\n")
+        (project / ".worktreeinclude").write_text(".env\n")
+        (project / ".env").write_text("existing branch\n")
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_existing", "input":None, "confirmed":False})
+        self.select(chooser, {"id":"worktree:refs/heads/feature/existing", "input":None, "confirmed":False})
+        assert socket_requests[1]["method"] == "worktree.create"
+        assert (self.root / "checkout/.env").read_text() == "existing branch\n"
+
+    def test_linked_source_copies_its_files_while_routing_creation_to_parent(self, socket_requests):
+        project = self.worktree_project()
+        linked = self.root / "linked"
+        subprocess.run(["git", "-C", str(project), "worktree", "add", "-qb", "feature/linked", str(linked)], check=True)
+        (project / ".env").write_text("MODE=main\n")
+        (linked / ".gitignore").write_text(".env\n")
+        (linked / ".worktreeinclude").write_text(".env\n")
+        (linked / ".env").write_text("MODE=feature\n")
+        snapshot = json.loads((self.root / "snapshot.json").read_text())
+        snapshot["workspaces"][0].update({"label":"Linked", "number":2})
+        snapshot["workspaces"][0]["worktree"] = {"checkout_path":str(linked), "repo_key":"project", "is_linked_worktree":True}
+        snapshot["workspaces"].append({"workspace_id":"w1", "label":"Main", "number":1, "active_tab_id":"w1:t1", "worktree":{"checkout_path":str(project), "repo_key":"project", "is_linked_worktree":False}})
+        snapshot["tabs"][0].update({"label":"Terminal", "number":1})
+        (self.root / "snapshot.json").write_text(json.dumps(snapshot))
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_new", "input":None, "confirmed":False})
+        self.select(chooser, {"id":"worktree:refs/heads/feature/linked", "input":"feature/copy", "confirmed":False})
+        assert socket_requests[1]["params"]["workspace_id"] == "w1"
+        assert (self.root / "checkout/.env").read_text() == "MODE=feature\n"
+
+    def test_copy_warnings_keep_checkout_success_and_history(self, socket_requests):
+        project = self.worktree_project()
+        (project / ".gitignore").write_text(".env*\n")
+        (project / ".worktreeinclude").write_text(".env*\n")
+        (project / ".env.local").write_text("MODE=local\n")
+        (project / ".env").symlink_to(".env.local")
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_new", "input":None, "confirmed":False})
+        self.select(chooser, {"id":"worktree:refs/heads/feature/palette", "input":"feature/warning", "confirmed":False})
+        assert (self.root / "checkout/.env.local").read_text() == "MODE=local\n"
+        assert not (self.root / "checkout/.env").exists()
+        assert ".env:" in self.stderr
+        assert str(self.root / "checkout") in self.stderr
+        assert json.loads((self.root / "plugin-state/palette-history.json").read_text()) == [{"Command":"herdr:worktree_new"}]
+
+    def test_invalid_include_rules_warn_without_failing_creation(self, socket_requests):
+        project = self.worktree_project()
+        (project / ".worktreeinclude").write_text("[z-a]\n")
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_new", "input":None, "confirmed":False})
+        self.select(chooser, {"id":"worktree:refs/heads/feature/palette", "input":"feature/invalid", "confirmed":False})
+        assert (self.root / "checkout/.git").exists()
+        assert ".worktreeinclude setup warning" in self.stderr
+        assert str(self.root / "checkout") in self.stderr
+
+    def test_missing_destination_path_warns_without_guessing(self, socket_requests):
+        project = self.worktree_project()
+        (project / ".gitignore").write_text(".env\n")
+        (project / ".worktreeinclude").write_text(".env\n")
+        (project / ".env").write_text("source\n")
+        (self.root / "missing-path").touch()
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_new", "input":None, "confirmed":False})
+        self.select(chooser, {"id":"worktree:refs/heads/feature/palette", "input":"feature/missing", "confirmed":False})
+        assert "no destination worktree path" in self.stderr
+        assert not (self.root / "checkout/.env").exists()
+
+    def test_failed_creation_does_not_copy_or_record_success(self, socket_requests):
+        project = self.worktree_project()
+        (project / ".gitignore").write_text(".env\n")
+        (project / ".worktreeinclude").write_text(".env\n")
+        (project / ".env").write_text("source\n")
+        (self.root / "create-error").touch()
+        directory = self.start()
+        chooser = self.next_popup(directory, {"id":"herdr:worktree_new", "input":None, "confirmed":False})
+        pending = chooser / "pending.json"
+        pending.write_text(json.dumps({"id":"worktree:refs/heads/feature/palette", "input":"feature/fail", "confirmed":False}))
+        pending.replace(chooser / "selection.json")
+        with pytest.raises(subprocess.TimeoutExpired):
+            self.process.communicate(timeout=0.15)
+        self.close_popup()
+        stdout, stderr = self.process.communicate(timeout=8)
+        assert self.process.returncode != 0, (stdout, stderr)
+        assert "creation failed" in stderr
+        assert not (self.root / "checkout").exists()
+        assert not (self.root / "plugin-state/palette-history.json").exists()
 
     def test_branch_cancellation_returns_to_commands_without_duplicate_actions_or_history(self):
         self.worktree_project()

@@ -13,6 +13,7 @@ categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0"
+ignore = "0.4"
 crossterm = "0.28"
 terminal_input = { package = "helix-crossterm", version = "=0.1.0-beta.1" }
 nucleo-matcher = "0.3"
