@@ -57,6 +57,9 @@ pub struct App {
     pub mode: Mode,
     pub theme: Theme,
     pub warning: Option<String>,
+    pub notice: Option<String>,
+    pub notice_offset: u16,
+    pub notice_max: u16,
     pub results_area: Rect,
     pub hits: Vec<(Rect, usize)>,
     pub ok_area: Rect,
@@ -92,6 +95,9 @@ impl App {
             mode: Mode::Search,
             theme,
             warning,
+            notice: None,
+            notice_offset: 0,
+            notice_max: 0,
             results_area: Rect::default(),
             hits: vec![],
             ok_area: Rect::default(),
@@ -266,6 +272,18 @@ impl App {
         }
     }
     pub fn handle(&mut self, event: Event) -> Action {
+        if self.notice.is_some()
+            && let Event::Key(key) = &event
+            && key.kind != KeyEventKind::Release
+            && key.modifiers.contains(KeyModifiers::ALT)
+            && matches!(key.code, KeyCode::Up | KeyCode::Down)
+        {
+            self.notice_offset = match key.code {
+                KeyCode::Down => self.notice_offset.saturating_add(1).min(self.notice_max),
+                _ => self.notice_offset.saturating_sub(1),
+            };
+            return Action::Continue;
+        }
         if self.screen.diagnostics && self.warning.is_some() {
             match event {
                 Event::ThemeModeChanged(appearance) => self.theme.set_appearance(appearance),

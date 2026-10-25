@@ -43,7 +43,7 @@ pub fn diagnostic_lines(message: &str, width: u16) -> Vec<String> {
 pub fn render(frame: &mut Frame<'_>, app: &mut App) {
     let palette = app.theme.palette();
     frame.render_widget(Paragraph::new("").style(palette.base_style()), frame.area());
-    let area = frame.area();
+    let mut area = frame.area();
     app.clear_hits();
     if area.width < 8 || area.height < 6 {
         frame.render_widget(
@@ -51,6 +51,24 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
             frame.area(),
         );
         return;
+    }
+    if let Some(notice) = &app.notice {
+        let message = format!("{notice}\nAlt+↑↓ Scroll notice");
+        let wrapped = diagnostic_lines(&message, area.width);
+        let height = u16::try_from(wrapped.len())
+            .unwrap_or(u16::MAX)
+            .min(area.height.saturating_sub(6).max(1));
+        app.notice_max =
+            u16::try_from(wrapped.len().saturating_sub(usize::from(height))).unwrap_or(u16::MAX);
+        app.notice_offset = app.notice_offset.min(app.notice_max);
+        frame.render_widget(
+            Paragraph::new(wrapped.join("\n"))
+                .style(palette.base_style().fg(palette.overlay1))
+                .scroll((app.notice_offset, 0)),
+            Rect::new(area.x, area.y, area.width, height),
+        );
+        area.y += height;
+        area.height -= height;
     }
     if app.screen.diagnostics
         && let Some(message) = &app.warning
@@ -266,6 +284,7 @@ pub fn run_mode(directory: &Path, mut theme: Theme, screen_key: &str) -> Result<
         catalog.warning,
         catalog.screen,
     );
+    app.notice = catalog.notice;
     app.set_recent_ids(catalog.recent_ids);
     for event in pending {
         match app.handle(event) {

@@ -35,6 +35,8 @@ pub struct Catalog {
     pub naming: Naming,
     pub items: Vec<Item>,
     pub warning: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
 }
 
 pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {

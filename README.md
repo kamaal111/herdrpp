@@ -296,14 +296,83 @@ validation, and test recipes. Select `just: format-check` for a quick run in
 an idle pane of the opening tab, or `just: build` to try a reusable task tab.
 The focus and snapshot tasks require Docker; the test and ready tasks require uv.
 
-Create `.herdr/tasks.json` at the workspace's checkout root or in a parent folder:
+Create a task file in `.herdr/` at the workspace's checkout root or in a parent
+folder. Supported names, in priority order, are `tasks.toml`, `tasks.yaml`,
+`tasks.yml`, `tasks.json`, and `tasks.json5`. JSON files accept full JSON5 syntax,
+including comments, trailing commas, single-quoted strings, and unquoted keys.
+
+TOML (`.herdr/tasks.toml`):
+
+```toml
+#:schema https://raw.githubusercontent.com/kamaal111/herdrpp/main/schemas/tasks.schema.json
+
+[[tasks]]
+label = "dev-server"
+command = "just"
+args = ["dev-server"]
+
+[[tasks]]
+label = "test"
+command = "cargo test"
+new_tab = false
+```
+
+YAML (`.herdr/tasks.yaml` or `.herdr/tasks.yml`):
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kamaal111/herdrpp/main/schemas/tasks.schema.json
+tasks:
+  - label: dev-server
+    command: just
+    args: [dev-server]
+  - label: test
+    command: cargo test
+    new_tab: false
+```
+
+JSON or JSON5 (`.herdr/tasks.json` or `.herdr/tasks.json5`):
+
+```json5
+{
+  "$schema": "https://raw.githubusercontent.com/kamaal111/herdrpp/main/schemas/tasks.schema.json",
+  // Tasks run from the active checkout.
+  tasks: [
+    {label: 'dev-server', command: 'just', args: ['dev-server'],},
+    {label: 'test', command: 'cargo test', new_tab: false},
+  ],
+}
+```
+
+JSON5 and YAML also accept a top-level task array, preserving existing JSON
+configurations. Object roots require `tasks` and accept optional `$schema`;
+other root fields are rejected. TOML uses `[[tasks]]` entries or `tasks = []`
+for an empty configuration. YAML accepts one document; quote command values
+such as `"true"` that YAML would otherwise interpret as booleans.
+
+The [task schema](schemas/tasks.schema.json) provides validation, completion,
+and field descriptions in compatible editors. It is hosted in this repository,
+with no SchemaStore registration. Add the schema reference shown above to opt
+in; the task runner never downloads it and works offline. A local schema path
+also works: this repository's `.herdr/tasks.json` uses
+`"$schema": "../schemas/tasks.schema.json"`.
+
+Use a YAML language-server integration for the YAML modeline, and a Taplo
+integration for TOML's `#:schema` directive. Full JSON5 syntax and schema
+validation require a compatible editor language integration; VS Code's built-in
+JSON/JSONC modes do not support every JSON5 extension. For strict JSON arrays,
+a VS Code workspace association can attach the schema without changing the file:
 
 ```json
-[
-  {"label": "dev-server", "command": "just", "args": ["dev-server"]},
-  {"label": "test", "command": "cargo test", "new_tab": false}
-]
+{
+  "json.schemas": [{
+    "fileMatch": ["**/.herdr/tasks.json"],
+    "url": "https://raw.githubusercontent.com/kamaal111/herdrpp/main/schemas/tasks.schema.json"
+  }]
+}
 ```
+
+Duplicate keys and task labels are checked at runtime; the schema cannot express
+all those checks. Runtime validation remains authoritative in every format.
 
 Each task accepts exactly these fields:
 
@@ -317,8 +386,7 @@ Each task accepts exactly these fields:
 Commands run through `/bin/sh` from the checkout root and support shell syntax
 such as pipelines and `&&`. Each argument is shell-quoted independently; empty
 arguments are preserved. NUL characters, duplicate fields, unknown fields,
-explicit `null`, and incorrect types are rejected. The top level must be a JSON
-array; comments and trailing commas are not supported.
+explicit `null`, and incorrect types are rejected in every format.
 
 Any invalid task disables execution for the entire file. The popup shows the
 absolute file path, task number and label, affected field, and correction for
@@ -349,10 +417,14 @@ identity. Detached background processes are outside restart management.
 
 Checkout discovery prefers workspace worktree metadata, otherwise the Git root
 of the opening pane's foreground or original directory. A resolvable Git
-checkout is required. Task discovery checks `.herdr/tasks.json` in that checkout,
-then in each parent folder up to 10 levels above it, stopping at the filesystem
-root. The nearest file wins; configurations are not merged. An empty or invalid
-nearest file shows its empty state or diagnostics without falling back farther.
+checkout is required. Task discovery checks supported files in that checkout,
+then each parent folder up to 10 levels above it, stopping at the filesystem
+root. The nearest directory with a task file wins. Within that directory,
+TOML takes priority over YAML, YML, JSON, and JSON5, in that order. Configurations
+are not merged. The task pane identifies the selected path and any ignored
+sibling files; Alt+Up/Down scrolls long notices without blocking task execution.
+An empty, invalid, or unreadable selected file shows its empty state or
+diagnostics without falling back to a sibling or ancestor file.
 For example, `/projects/.herdr/tasks.json` can share tasks across checkouts at
 `/projects/api` and `/projects/web`. Commands still run from the active checkout,
 so those shared tasks run in `/projects/api` or `/projects/web`, respectively.

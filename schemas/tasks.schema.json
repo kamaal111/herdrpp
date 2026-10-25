@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/kamaal111/herdrpp/main/schemas/tasks.schema.json",
+  "title": "Herdr tasks",
+  "description": "Workspace tasks for Herdr. Duplicate keys and labels are additionally checked by the task runner.",
+  "definitions": {
+    "tasks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/task"
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "command"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
+          "not": {
+            "pattern": "[\\u0000-\\u001f\\u007f-\\u009f]"
+          },
+          "description": "Unique searchable task name, without control characters."
+        },
+        "command": {
+          "type": "string",
+          "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
+          "not": {
+            "pattern": "\\u0000"
+          },
+          "description": "Shell command executed through /bin/sh from the active checkout root."
+        },
+        "args": {
+          "type": "array",
+          "default": [],
+          "description": "Literal, individually shell-quoted arguments. Empty strings are preserved.",
+          "items": {
+            "type": "string",
+            "not": {
+              "pattern": "\\u0000"
+            }
+          }
+        },
+        "new_tab": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open a reusable task tab; false prefers an idle pane in the opening tab."
+        }
+      }
+    }
+  },
+  "type": [
+    "array",
+    "object"
+  ],
+  "additionalProperties": false,
+  "required": [
+    "tasks"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
+      "not": {
+        "pattern": "\\u0000"
+      },
+      "description": "Optional editor schema URL or local path; never fetched by the task runner."
+    },
+    "tasks": {
+      "$ref": "#/definitions/tasks"
+    }
+  },
+  "items": {
+    "$ref": "#/definitions/task"
+  }
+}

@@ -43,6 +43,7 @@ pub fn initial(
         naming: super::naming::Naming::from_snapshot(snapshot, context),
         items,
         warning: None,
+        notice: None,
     })
 }
 
@@ -143,5 +144,6 @@ pub fn transition(item: &Item, catalog: &Catalog) -> Result<Option<Catalog>> {
         naming: catalog.naming.clone(),
         items: vec![],
         warning: None,
+        notice: None,
     }))
 }
