@@ -7,8 +7,8 @@ use herdrpp::{
 fn execute(action: &str) -> Result<()> {
     match action {
         "open" | "pick" | "check" => cli::run(&Herdr::default(), action),
-        "tasks" => herdrpp::palette::cli::open_mode(&Herdr::default(), true),
-        "pick-task" => herdrpp::palette::cli::pick_mode(true),
+        "tasks" => herdrpp::palette::cli::open_mode(&Herdr::default(), "tasks"),
+        "pick-task" => herdrpp::palette::cli::pick_mode("tasks"),
         "commands" => herdrpp::palette::cli::open(&Herdr::default()),
         "pick-command" => herdrpp::palette::cli::pick(),
         "start" => Session::load()?.start(),

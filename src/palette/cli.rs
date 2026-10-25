@@ -1,15 +1,12 @@
 use super::{
     api,
     app::Selection,
-    catalog::{self, Command, Context, Item},
+    catalog::{Command, Context, Item},
     history::{self, History, UsageKey},
     naming::Naming,
     ui,
 };
-use crate::picker::{
-    api::{Herdr, decode},
-    theme::Theme,
-};
+use crate::picker::{api::Herdr, theme::Theme};
 use anyhow::{Context as _, Result, ensure};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -27,38 +24,11 @@ use std::{
 
 const LIMIT: u64 = 4 * 1024 * 1024;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub enum View {
-    #[default]
-    Commands,
-    ExistingBranches {
-        root: PathBuf,
-    },
-    BaseBranches {
-        root: PathBuf,
-        invocation_branch: String,
-    },
-}
-
-impl View {
-    pub fn branches(&self) -> bool {
-        !matches!(self, Self::Commands)
-    }
-    pub fn title(&self) -> &'static str {
-        match self {
-            Self::Commands => "Search commands",
-            Self::ExistingBranches { .. } => "Choose existing branch",
-            Self::BaseBranches { .. } => "Choose base branch",
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct Catalog {
+    pub screen: super::registry::Screen,
     #[serde(default)]
-    pub view: View,
-    #[serde(default)]
-    pub tasks: bool,
+    pub payload: super::providers::Payload,
     #[serde(default)]
     pub recent_ids: Vec<String>,
     pub context: Context,
@@ -93,118 +63,34 @@ pub fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
 }
 
 pub fn validate_selection<'a>(items: &'a [Item], selection: &Selection) -> Result<&'a Command> {
-    let command = &items
-        .iter()
-        .find(|item| item.id == selection.id)
-        .context("unknown palette command")?
-        .command;
-    match command {
-        Command::WorktreeBranch { new: true, .. } => {
-            ensure!(
-                selection.input.as_ref().is_some_and(
-                    |text| !text.trim().is_empty() && !text.chars().any(char::is_control)
-                ) && !selection.confirmed,
-                "new worktree requires a branch name"
-            )
-        }
-        Command::Close(_) => ensure!(
-            selection.confirmed && selection.input.is_none(),
-            "closing requires confirmation"
-        ),
-        Command::Create(_) => ensure!(
-            selection
-                .input
-                .as_ref()
-                .is_some_and(|text| !text.chars().any(char::is_control))
-                && !selection.confirmed,
-            "creation requires a name prompt"
-        ),
-        Command::Rename(_) => {
-            ensure!(
-                selection.input.as_ref().is_some_and(
-                    |text| !text.trim().is_empty() && !text.chars().any(char::is_control)
-                ) && !selection.confirmed,
-                "rename requires a name"
-            )
-        }
-        _ => ensure!(
-            selection.input.is_none() && !selection.confirmed,
-            "unexpected palette command input"
-        ),
-    }
-    Ok(command)
+    Ok(&selected_item(items, selection)?.command)
 }
 
-fn load(
-    api: &Herdr,
-    mut catalog: Catalog,
-    cancelled: &AtomicBool,
-    repo_directory: Option<&Path>,
-) -> Catalog {
-    if let View::ExistingBranches { root } | View::BaseBranches { root, .. } = &catalog.view {
-        let new = matches!(catalog.view, View::BaseBranches { .. });
-        let invocation_branch = match &catalog.view {
-            View::BaseBranches {
-                invocation_branch, ..
-            } => Some(invocation_branch.as_str()),
-            _ => None,
-        };
-        match super::worktree::load(root, new, invocation_branch, cancelled) {
-            Ok((items, warning)) => {
-                catalog.items = items;
-                catalog.warning = warning;
-            }
-            Err(error) => {
-                catalog.items.clear();
-                catalog.warning = Some(format!("Cannot load branches: {error:#}"));
-            }
-        }
-        return catalog;
-    }
-    if let Some(directory) = repo_directory {
-        if let Ok(Some(item)) = super::repository::item(directory, cancelled) {
-            catalog.items.push(item);
-        }
-        if let Ok(root) = super::worktree::root(directory, cancelled) {
-            catalog.items.extend(super::worktree::actions(&root));
-        }
-    }
-    catalog.naming.resolve_workspace_suggestion(cancelled);
-    let plugins = (|| {
-        let plugins = decode(&api.call_cancellable(&["plugin", "list", "--json"], cancelled)?)?;
-        let actions = decode(&api.call_cancellable(&["plugin", "action", "list"], cancelled)?)?;
-        catalog::plugin_items(plugins, actions, &catalog.context, env::consts::OS)
-    })();
-    catalog.warning = match plugins {
-        Ok(actions) => {
-            catalog.items.extend(actions);
-            None
-        }
-        Err(error) => Some(format!("Plugin commands unavailable: {error:#}")),
-    };
-    catalog::sort(&mut catalog.items);
-    let mut ids = std::collections::HashSet::new();
-    catalog.items.retain(|item| ids.insert(item.id.clone()));
-    catalog
+fn selected_item<'a>(items: &'a [Item], selection: &Selection) -> Result<&'a Item> {
+    let item = items
+        .iter()
+        .find(|item| item.id == selection.id)
+        .context("unknown palette command")?;
+    super::registry::validate_submission(item, selection)?;
+    Ok(item)
 }
 
 fn owner(
     api: &Herdr,
     directory: &Path,
-    context: &Context,
     initial_catalog: Catalog,
     cancelled: &AtomicBool,
-    tasks: bool,
     repo_directory: Option<&Path>,
 ) -> Result<Option<(Catalog, Selection)>> {
     thread::scope(|scope| {
         let (sender, receiver) = mpsc::channel();
         scope.spawn(move || {
-            let _ = sender.send(if tasks {
-                crate::tasks::load(api, context)
-            } else {
-                load(api, initial_catalog, cancelled, repo_directory)
-            });
+            let _ = sender.send(super::providers::load(
+                api,
+                initial_catalog,
+                cancelled,
+                repo_directory,
+            ));
         });
         let result = (|| {
             let mut catalog = None;
@@ -213,12 +99,14 @@ fn owner(
             let mut selected: Option<Option<Selection>> = None;
             let mut selected_at = None;
             loop {
-                if catalog.is_none()
-                    && let Ok(mut loaded) = receiver.try_recv()
+                if selected.is_none()
+                    && catalog.is_none()
+                    && let Ok(loaded) = receiver.try_recv()
                 {
+                    let mut loaded = loaded?;
                     match history::state_directory().and_then(|directory| History::load(&directory))
                     {
-                        Ok(history) if !loaded.view.branches() => {
+                        Ok(history) if loaded.screen.history => {
                             loaded.recent_ids = history.recent_ids(&loaded.items)
                         }
                         Ok(_) => {}
@@ -296,10 +184,10 @@ fn owner(
 }
 
 pub fn open(api: &Herdr) -> Result<()> {
-    open_mode(api, false)
+    open_mode(api, "commands")
 }
 
-pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
+pub fn open_mode(api: &Herdr, screen: &str) -> Result<()> {
     let context: Context = serde_json::from_str(
         &env::var("HERDR_PLUGIN_CONTEXT_JSON")
             .context("launch commands through a Herdr plugin action")?,
@@ -309,79 +197,34 @@ pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
         PathBuf::from(env::var_os("HERDR_SOCKET_PATH").context("missing Herdr session socket")?);
     let snapshot = api.raw_snapshot()?;
     api::validate_context(&snapshot, &context)?;
-    let naming = Naming::from_snapshot(&snapshot, &context);
-    let mut items = catalog::builtins(&context);
-    if !tasks && let Some(item) = super::pull_request::item_from_snapshot(&snapshot, &context) {
-        items.push(item);
-    }
     let repo_directory = super::repository::directory_from_snapshot(&snapshot, &context);
-    let initial_catalog = Catalog {
-        view: View::Commands,
-        tasks,
-        recent_ids: vec![],
-        context: context.clone(),
-        naming,
-        items,
-        warning: None,
-    };
+    let screen = super::registry::Registry::bundled()?.screen(screen)?;
+    let initial_catalog = super::providers::initial(&snapshot, &context, screen)?;
     let mut next_catalog = initial_catalog;
     let mut return_catalog = None;
     let mut workflow_key = None;
     loop {
         let directory = tempfile::tempdir()?;
-        write_json(&directory.path().join("view.json"), &next_catalog.view)?;
+        write_json(&directory.path().join("screen.json"), &next_catalog.screen)?;
         let request_env = format!("HERDRPP_PALETTE_REQUEST={}", directory.path().display());
-        api.open_popup(
-            if tasks {
-                "task-palette"
-            } else {
-                "command-palette"
-            },
-            Some(&request_env),
-        )?;
+        api.open_popup(&next_catalog.screen.entrypoint, Some(&request_env))?;
         let cancelled = AtomicBool::new(false);
         let selected = owner(
             api,
             directory.path(),
-            &context,
             next_catalog,
             &cancelled,
-            tasks,
             repo_directory.as_deref(),
         )?;
         if directory.path().join("abort.json").exists() {
             return Ok(());
         }
         if let Some((catalog, selection)) = selected {
-            let command = validate_selection(&catalog.items, &selection)?;
-            let key = catalog
-                .items
-                .iter()
-                .find(|item| item.id == selection.id)
-                .map(UsageKey::for_item)
-                .context("unknown palette command")?;
-            if let Command::ChooseWorktree {
-                root,
-                new,
-                invocation_branch,
-            } = command
-            {
-                next_catalog = Catalog {
-                    view: if *new {
-                        View::BaseBranches {
-                            root: root.clone(),
-                            invocation_branch: invocation_branch.clone(),
-                        }
-                    } else {
-                        View::ExistingBranches { root: root.clone() }
-                    },
-                    tasks: false,
-                    recent_ids: vec![],
-                    context: context.clone(),
-                    naming: catalog.naming.clone(),
-                    items: vec![],
-                    warning: None,
-                };
+            let item = selected_item(&catalog.items, &selection)?;
+            let command = &item.command;
+            let key = UsageKey::for_item(item);
+            if let Some(next) = super::providers::transition(item, &catalog)? {
+                next_catalog = next;
                 workflow_key = Some(key);
                 return_catalog = Some(catalog);
                 continue;
@@ -410,10 +253,10 @@ pub fn open_mode(api: &Herdr, tasks: bool) -> Result<()> {
 }
 
 pub fn pick() -> Result<()> {
-    pick_mode(false)
+    pick_mode("commands")
 }
 
-pub fn pick_mode(tasks: bool) -> Result<()> {
+pub fn pick_mode(screen: &str) -> Result<()> {
     let directory = PathBuf::from(
         env::var_os("HERDRPP_PALETTE_REQUEST")
             .context("launch pick-command through the command palette")?,
@@ -424,7 +267,7 @@ pub fn pick_mode(tasks: bool) -> Result<()> {
     }
     let terminal = crate::search::terminal::popup_terminal_path()?;
     write_json(&directory.join("terminal.json"), &terminal)?;
-    let selection = ui::run_mode(&directory, theme, tasks)?;
+    let selection = ui::run_mode(&directory, theme, screen)?;
     write_json(&directory.join("selection.json"), &selection)?;
     // Exit exactly as the workspace picker does. The owner waits until Herdr
     // releases this popup's PTY before invoking any selected command.

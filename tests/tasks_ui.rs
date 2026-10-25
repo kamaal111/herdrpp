@@ -20,24 +20,32 @@ fn task_app() -> App {
         args: vec![],
         new_tab: true,
     };
-    let item = Item {
-        id: "task:0".into(),
-        title: task.label.clone(),
-        source: "Task".into(),
-        description: task.command.clone(),
-        command: Command::Task {
+    let item = Item::new(
+        "task:0".into(),
+        task.label.clone(),
+        "Task".into(),
+        task.command.clone(),
+        Command::Task {
             task,
             root: "/tmp".into(),
         },
-    };
+    )
+    .unwrap();
     let mut app = App::new(
         catalog::Context::default(),
         vec![item],
         herdrpp::palette::naming::Naming::default(),
         Theme::default(),
         None,
+        herdrpp::palette::registry::Registry::bundled()
+            .unwrap()
+            .screen("commands")
+            .unwrap(),
     );
-    app.tasks = true;
+    app.screen = herdrpp::palette::registry::Registry::bundled()
+        .unwrap()
+        .screen("tasks")
+        .unwrap();
     app
 }
 

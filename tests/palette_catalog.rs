@@ -13,14 +13,14 @@ fn context() -> Context {
 
 #[test]
 fn builtin_catalog_has_all_sixteen_actions_and_no_client_only_actions() {
-    let items = catalog::builtins(&context());
+    let items = catalog::builtins(&context()).unwrap();
     assert_eq!(items.len(), 16);
     assert!(!items.iter().any(|item| item.title.contains("Settings")));
 }
 
 #[test]
 fn palette_uses_shared_match_scores_and_highlights() {
-    let items = catalog::builtins(&context());
+    let items = catalog::builtins(&context()).unwrap();
     let hits = catalog::search(&items, "SPL RGT", &mut FieldMatcher::default());
     let item = &items[hits[0].item];
     assert_eq!(item.title, "Split Pane Right");
@@ -35,7 +35,7 @@ fn palette_uses_shared_match_scores_and_highlights() {
 
 #[test]
 fn all_terms_are_required_and_whitespace_restores_alphabetical_order() {
-    let items = catalog::builtins(&context());
+    let items = catalog::builtins(&context()).unwrap();
     assert!(catalog::search(&items, "split nonexistent", &mut FieldMatcher::default()).is_empty());
     assert_eq!(
         catalog::search(&items, " \t", &mut FieldMatcher::default()).len(),
@@ -109,7 +109,7 @@ fn view_pull_request_uses_only_opening_workspace_status_and_is_searchable() {
             directory: "/projects/herdrpp".into(),
         }
     );
-    let mut items = catalog::builtins(&context());
+    let mut items = catalog::builtins(&context()).unwrap();
     items.push(item);
     catalog::sort(&mut items);
     assert_eq!(items.last().unwrap().title, "View Pull Request");
@@ -170,7 +170,7 @@ fn view_pull_request_is_hidden_without_a_directory() {
 
 #[test]
 fn empty_queries_use_recent_items_then_original_order_and_search_is_unchanged() {
-    let items = catalog::builtins(&context());
+    let items = catalog::builtins(&context()).unwrap();
     let recent = vec![
         "herdr:zoom".into(),
         "herdr:search_workspaces".into(),

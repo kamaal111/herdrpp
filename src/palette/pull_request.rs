@@ -15,11 +15,12 @@ pub fn item_from_snapshot(snapshot: &Value, context: &Context) -> Option<Item> {
     }
     let number: u64 = digits.parse().ok().filter(|number| *number > 0)?;
     let directory = super::repository::directory_from_snapshot(snapshot, context)?;
-    Some(Item {
-        id: "herdr:view_pull_request".into(),
-        title: "View Pull Request".into(),
-        source: "Herdr".into(),
-        description: String::new(),
-        command: Command::ViewPullRequest { number, directory },
-    })
+    Item::new(
+        "herdr:view_pull_request".into(),
+        String::new(),
+        "Herdr".into(),
+        String::new(),
+        Command::ViewPullRequest { number, directory },
+    )
+    .ok()
 }

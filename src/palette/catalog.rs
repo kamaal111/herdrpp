@@ -18,8 +18,11 @@ pub struct Context {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Scope {
+    #[serde(alias = "workspace")]
     Workspace,
+    #[serde(alias = "tab")]
     Tab,
+    #[serde(alias = "pane")]
     Pane,
 }
 
@@ -58,9 +61,13 @@ impl Scope {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Direction {
+    #[serde(alias = "left")]
     Left,
+    #[serde(alias = "right")]
     Right,
+    #[serde(alias = "up")]
     Up,
+    #[serde(alias = "down")]
     Down,
 }
 impl Direction {
@@ -117,16 +124,26 @@ pub struct Item {
     pub source: String,
     pub description: String,
     pub command: Command,
+    pub behavior: super::registry::Behavior,
 }
 
 impl Item {
+    pub fn new(
+        id: String,
+        title: String,
+        source: String,
+        description: String,
+        command: Command,
+    ) -> Result<Self> {
+        super::registry::Registry::bundled()?.bind(id, title, source, description, command)
+    }
     pub fn fields(&self) -> [&str; 4] {
-        if matches!(self.command, Command::Task { .. }) {
-            ["", "", "", &self.title]
-        } else if matches!(self.command, Command::WorktreeBranch { .. }) {
-            [&self.source, "", "", &self.title]
-        } else {
-            [&self.source, &self.id, &self.description, &self.title]
+        match self.behavior.search {
+            super::registry::SearchProfile::Title => ["", "", "", &self.title],
+            super::registry::SearchProfile::SourceTitle => [&self.source, "", "", &self.title],
+            super::registry::SearchProfile::All => {
+                [&self.source, &self.id, &self.description, &self.title]
+            }
         }
     }
 }
@@ -175,79 +192,8 @@ pub fn search_with_recent(
     hits
 }
 
-pub fn builtins(context: &Context) -> Vec<Item> {
-    let mut items = Vec::new();
-    let mut add = |id: String, title: String, command| {
-        items.push(Item {
-            id,
-            title,
-            source: "Herdr".into(),
-            description: String::new(),
-            command,
-        })
-    };
-    add(
-        "herdr:search_workspaces".into(),
-        "Search Workspaces".into(),
-        Command::SearchWorkspaces,
-    );
-    for scope in [Scope::Workspace, Scope::Tab, Scope::Pane] {
-        if scope != Scope::Pane && context.workspace_id.is_some() {
-            add(
-                format!("herdr:{}_create", scope.cli()),
-                format!("New {}", scope.name()),
-                Command::Create(scope),
-            );
-        }
-        if scope.id(context).is_some() {
-            add(
-                format!("herdr:{}_rename", scope.cli()),
-                format!("Rename {}", scope.name()),
-                Command::Rename(scope),
-            );
-            add(
-                format!("herdr:{}_close", scope.cli()),
-                format!("Close {}", scope.name()),
-                Command::Close(scope),
-            );
-        }
-    }
-    if context.focused_pane_id.is_some() {
-        for direction in [Direction::Right, Direction::Down] {
-            add(
-                format!("herdr:split_{}", direction.cli()),
-                format!("Split Pane {}", title_case(direction.cli())),
-                Command::Split(direction),
-            );
-        }
-        for direction in [
-            Direction::Left,
-            Direction::Right,
-            Direction::Up,
-            Direction::Down,
-        ] {
-            add(
-                format!("herdr:focus_{}", direction.cli()),
-                format!("Focus Pane {}", title_case(direction.cli())),
-                Command::Focus(direction),
-            );
-        }
-        add(
-            "herdr:zoom".into(),
-            "Toggle Pane Zoom".into(),
-            Command::Zoom,
-        );
-    }
-    sort(&mut items);
-    items
-}
-
-fn title_case(text: &str) -> String {
-    let mut chars = text.chars();
-    chars
-        .next()
-        .map(|ch| ch.to_uppercase().to_string() + chars.as_str())
-        .unwrap_or_default()
+pub fn builtins(context: &Context) -> Result<Vec<Item>> {
+    super::registry::Registry::bundled()?.builtins(context)
 }
 
 #[derive(Deserialize)]
@@ -324,16 +270,16 @@ pub fn plugin_items(
         );
         let id = format!("{}.{}", action.plugin_id, action.action_id);
         ensure!(ids.insert(id.clone()), "duplicate plugin action ID");
-        items.push(Item {
+        items.push(Item::new(
             id,
-            title: action.title,
-            source: plugin.name.clone(),
-            description: action.description.unwrap_or_default(),
-            command: Command::Plugin {
+            action.title,
+            plugin.name.clone(),
+            action.description.unwrap_or_default(),
+            Command::Plugin {
                 plugin_id: action.plugin_id,
                 action_id: action.action_id,
             },
-        });
+        )?);
     }
     sort(&mut items);
     Ok(items)

@@ -23,6 +23,60 @@ Useful focused commands include `cargo test --locked --test picker_search`,
 `uv run --locked pytest tests/test_configure.py`, and `just test-pty`.
 Run `just` for all recipes. See [snapshots](snapshots.md) for Docker details.
 
+## Command palette definitions
+
+The palette registry lives in `src/palette/commands.toml` and is embedded in
+the binary. Editing a definition and rebuilding ships the change; there is no
+runtime registry file to install. User tasks still come from `.herdr/tasks.json`.
+
+Commands using an existing Rust handler need only a TOML entry:
+
+```toml
+[[commands]]
+id = "review:rename_tab"
+title = "Rename Review Tab"
+requires = ["workspace", "tab"]
+handler = { kind = "rename", scope = "tab" }
+steps = [
+  { kind = "text", key = "name", initial = "current_label", validator = "visible_name" },
+]
+```
+
+Use an empty or omitted `steps` array for immediate operations such as
+`handler = { kind = "split", direction = "down" }`. A `confirm` step adds a
+confirmation before execution. Text and confirmation steps can be composed;
+Escape returns to the previous step and Ctrl+C cancels. The current handlers
+accept one text value, `name`; handlers that require other inputs need an
+explicit Rust binding rather than arbitrary JSON arguments.
+
+Text steps support `initial` (`empty`, `current_label`, `suggested_name`),
+`validator` (`visible_name`, `automatic_name`, `new_branch`), `select_all`,
+`message`, `help`, and `error`. Defaults show the command title, use
+`Enter Save  Esc Back`, and reject blank visible names. Messages support only
+`{title}` and `{target}` substitutions. Handler contracts require the appropriate
+validator and mandatory confirmation; `requires` adds availability restrictions
+and cannot remove a handler's required target.
+
+Screens in `[screens.commands]`, `[screens.tasks]`, and the branch screens own
+search/loading/empty/help text, the popup entrypoint, diagnostic presentation,
+history ordering, and whole-flow cancellation behavior. Definitions can set
+`search` (`all`, `title`, `source_title`), `detail` (`source`, `id`), and `history`
+(`command`, `task`). IDs and history identities should remain stable.
+
+Dynamic commands use `template = true` definitions. Task, plugin, and branch
+providers supply titles and typed operation data; templates own their search,
+prompt, and presentation rules. A `choice` step selects a registered Rust
+provider and screen, whose row templates describe the next interaction. The
+worktree definitions demonstrate choosing a branch and then naming a checkout.
+
+New domain behavior belongs in the typed bindings in `palette::registry`,
+`palette::providers`, and the operation executor, reusing existing domain
+services. It must not add command-identity cases to generic activation,
+rendering, submission validation, or popup orchestration. Unknown properties,
+duplicate IDs/templates, invalid handler properties, and incompatible steps
+are rejected before a command can run. Registry tests include a TOML-only
+alias exercised through the shared prompt, confirmation, and request builder.
+
 ## Local plugin
 
 These commands intentionally modify your local Herdr registry or session;

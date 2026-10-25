@@ -3,6 +3,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{path::Path, process::Command, sync::atomic::AtomicBool, time::Duration};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum NamePolicy {
+    Visible,
+    Automatic,
+}
+
+pub fn validate_name(input: &str, policy: NamePolicy, error: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !input.chars().any(char::is_control)
+            && (policy == NamePolicy::Automatic || !input.trim().is_empty()),
+        "{error}"
+    );
+    Ok(())
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Naming {
     pub workspace_name: String,

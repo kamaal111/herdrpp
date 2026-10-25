@@ -2,7 +2,6 @@ use herdrpp::palette::worktree::{self, Branch};
 use herdrpp::palette::{
     app::{Action, App, Mode},
     catalog::Context,
-    cli::View,
     naming::Naming,
 };
 use serde_json::json;
@@ -138,7 +137,8 @@ fn branch_search_uses_the_palette_matcher_and_highlights() {
     let root = project();
     git(root.path(), &["branch", "feature/report"]);
     let branches = worktree::branches(root.path(), &AtomicBool::new(false)).unwrap();
-    let items = worktree::branch_items(root.path(), &branches, true, Some("feature/report"));
+    let items =
+        worktree::branch_items(root.path(), &branches, true, Some("feature/report")).unwrap();
     assert_eq!(items[0].title, "feature/report");
     let hits = herdrpp::palette::catalog::search(&items, "FEAT REPORT", &mut Default::default());
     assert_eq!(hits.len(), 1);
@@ -285,18 +285,23 @@ fn base_chooser_prompts_for_name_validates_and_returns_to_selected_base() {
         &[local_branch(root.path())],
         true,
         Some("feature/palette"),
-    );
+    )
+    .unwrap();
     let mut app = App::new(
         Context::default(),
         items,
         Naming::default(),
         Default::default(),
         None,
+        herdrpp::palette::registry::Registry::bundled()
+            .unwrap()
+            .screen("commands")
+            .unwrap(),
     );
-    app.view = View::BaseBranches {
-        root: root.path().into(),
-        invocation_branch: "feature/palette".into(),
-    };
+    app.screen = herdrpp::palette::registry::Registry::bundled()
+        .unwrap()
+        .screen("base_branches")
+        .unwrap();
     assert_eq!(app.selected, Some(0));
     assert_eq!(
         app.handle(Event::Key(KeyEvent::new(

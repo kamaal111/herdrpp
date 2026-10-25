@@ -1,6 +1,6 @@
 //! Durable usage history, independent of ephemeral palette selection IDs.
 use super::{
-    catalog::{Command, Item},
+    catalog::Item,
     cli::{read_json, write_json},
 };
 use anyhow::{Context, Result, ensure};
@@ -22,13 +22,7 @@ pub enum UsageKey {
 
 impl UsageKey {
     pub fn for_item(item: &Item) -> Self {
-        match &item.command {
-            Command::Task { root, task } => Self::Task {
-                root: root.clone(),
-                label: task.label.clone(),
-            },
-            _ => Self::Command(item.id.clone()),
-        }
+        super::registry::usage_key(item)
     }
 }
 

@@ -25,7 +25,7 @@ test:
     uv run --locked pytest -m 'not snapshot'
 
 test-pty: build-release
-    python3 tests/pty_smoke.py
+    uv run --locked python tests/pty_smoke.py
 
 quality: format-check lint
 

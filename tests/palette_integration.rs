@@ -55,7 +55,7 @@ fn mismatched_target_parents_are_rejected() {
 
 #[test]
 fn selections_must_belong_to_catalog_and_close_requires_confirmation() {
-    let items = catalog::builtins(&context());
+    let items = catalog::builtins(&context()).unwrap();
     assert!(
         cli::validate_selection(
             &items,
@@ -195,7 +195,7 @@ fn creation_requests_use_original_workspace_and_preserve_literal_custom_names() 
 
 #[test]
 fn creation_selection_requires_prompt_input_and_rejects_control_characters() {
-    let items = catalog::builtins(&context());
+    let items = catalog::builtins(&context()).unwrap();
     assert_eq!(
         cli::validate_selection(
             &items,
@@ -249,13 +249,16 @@ fn view_pull_request_selection_requires_no_input_or_confirmation() {
         number: 123,
         directory: "/projects/herdrpp".into(),
     };
-    let items = vec![catalog::Item {
-        id: "herdr:view_pull_request".into(),
-        title: "View Pull Request".into(),
-        source: "Herdr".into(),
-        description: String::new(),
-        command: command.clone(),
-    }];
+    let items = vec![
+        catalog::Item::new(
+            "herdr:view_pull_request".into(),
+            "View Pull Request".into(),
+            "Herdr".into(),
+            String::new(),
+            command.clone(),
+        )
+        .unwrap(),
+    ];
     let selection = Selection {
         id: "herdr:view_pull_request".into(),
         input: None,
@@ -294,13 +297,16 @@ fn open_repo_selection_requires_no_input_or_confirmation() {
     let command = Command::OpenRepo {
         url: "https://github.com/kamaal111/herdrpp".into(),
     };
-    let items = vec![catalog::Item {
-        id: "herdr:open_repo".into(),
-        title: "Open Repo".into(),
-        source: "Herdr".into(),
-        description: String::new(),
-        command: command.clone(),
-    }];
+    let items = vec![
+        catalog::Item::new(
+            "herdr:open_repo".into(),
+            "Open Repo".into(),
+            "Herdr".into(),
+            String::new(),
+            command.clone(),
+        )
+        .unwrap(),
+    ];
     let selection = Selection {
         id: "herdr:open_repo".into(),
         input: None,

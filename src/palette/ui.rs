@@ -1,6 +1,7 @@
 use super::{
     app::{Action, App, Mode, Selection},
     cli::{Catalog, read_json},
+    registry::{self, Detail, Screen as ScreenSpec, Step},
 };
 use crate::{
     picker::theme::{Palette, Theme},
@@ -51,7 +52,7 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
         );
         return;
     }
-    if app.tasks
+    if app.screen.diagnostics
         && let Some(message) = &app.warning
     {
         let body = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
@@ -76,28 +77,13 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 chunks[1],
                 palette,
                 app.input(),
-                if app.tasks {
-                    "Search tasks"
-                } else {
-                    app.view.title()
-                },
+                &app.screen.search_label,
                 app.results.len(),
             );
             app.results_area = chunks[2];
             app.ensure_visible(usize::from(chunks[2].height));
             if app.results.is_empty() {
-                view::render_empty(
-                    frame,
-                    chunks[2],
-                    palette,
-                    if app.tasks {
-                        "No matching tasks"
-                    } else if app.view.branches() {
-                        "No matching branches"
-                    } else {
-                        "No matching commands"
-                    },
-                );
+                view::render_empty(frame, chunks[2], palette, &app.screen.empty);
             }
             for (y, index) in (app.offset..app.results.len())
                 .take(usize::from(chunks[2].height))
@@ -111,9 +97,9 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 } else {
                     "  "
                 })];
-                let (detail, detail_matches) = match &item.command {
-                    super::catalog::Command::Plugin { .. } => (&item.id, &hit.matched.indices[1]),
-                    _ => (&item.source, &hit.matched.indices[0]),
+                let (detail, detail_matches) = match item.behavior.detail {
+                    Detail::Id => (&item.id, &hit.matched.indices[1]),
+                    Detail::Source => (&item.source, &hit.matched.indices[0]),
                 };
                 let detail_width =
                     unicode_width::UnicodeWidthStr::width(detail.as_str()).min(width / 3);
@@ -140,14 +126,8 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 app.hits.push((row, index));
             }
             frame.render_widget(
-                Paragraph::new(if app.tasks {
-                    "↑↓/Ctrl+P,N Tasks  Enter Run"
-                } else if app.view.branches() {
-                    "↑↓/Ctrl+P,N Branches  Enter Select"
-                } else {
-                    "↑↓/Ctrl+P,N Commands  Enter Run"
-                })
-                .style(palette.base_style().fg(palette.overlay1)),
+                Paragraph::new(app.screen.help.as_str())
+                    .style(palette.base_style().fg(palette.overlay1)),
                 chunks[3],
             );
             let details = app
@@ -157,22 +137,10 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                     let item = &app.items[hit.item];
                     format!(
                         "{} · {} {}",
-                        if app.tasks {
-                            "Task Palette"
-                        } else {
-                            "Command Palette"
-                        },
-                        item.source,
-                        item.description
+                        app.screen.title, item.source, item.description
                     )
                 })
-                .unwrap_or_else(|| {
-                    if app.tasks {
-                        "Task Palette".into()
-                    } else {
-                        "Command Palette".into()
-                    }
-                });
+                .unwrap_or_else(|| app.screen.title.clone());
             let message = app.warning.as_deref().unwrap_or(&details);
             frame.render_widget(
                 Paragraph::new(Line::from(view::label_spans(
@@ -184,60 +152,50 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
                 chunks[4],
             );
         }
-        Mode::Name { item, input, error } => {
+        Mode::Name { input, error, .. } => {
             view::render_name_input(frame, chunks[0], chunks[1], palette, input);
-            let message = if *error {
-                app.prompt_error
-                    .clone()
-                    .unwrap_or_else(|| "Enter a nonblank name".to_string())
-            } else if matches!(
-                app.items[*item].command,
-                super::catalog::Command::WorktreeBranch { .. }
-            ) {
-                format!("New branch name · Base: {}", app.items[*item].title)
-            } else {
-                app.items[*item].title.clone()
-            };
-            frame.render_widget(
-                Paragraph::new(message).style(palette.base_style()),
-                chunks[2],
-            );
-            frame.render_widget(
-                Paragraph::new(
-                    if matches!(
-                        app.items[*item].command,
-                        super::catalog::Command::Create(_)
-                            | super::catalog::Command::WorktreeBranch { .. }
-                    ) {
-                        "Enter Create  Esc Back"
-                    } else {
-                        "Enter Save  Esc Back"
-                    },
-                )
-                .style(palette.base_style()),
-                chunks[3],
-            );
+            if let Some((
+                item,
+                Step::Text {
+                    message,
+                    help,
+                    error: fallback,
+                    ..
+                },
+            )) = app.active_step()
+            {
+                let message = if *error {
+                    app.prompt_error.clone().unwrap_or_else(|| fallback.clone())
+                } else {
+                    registry::format_text(message, item, &app.context)
+                };
+                frame.render_widget(
+                    Paragraph::new(message).style(palette.base_style()),
+                    chunks[2],
+                );
+                frame.render_widget(
+                    Paragraph::new(help.as_str()).style(palette.base_style()),
+                    chunks[3],
+                );
+            }
         }
-        Mode::Confirm { item } => {
-            let command = &app.items[*item];
-            let target = match command.command {
-                super::catalog::Command::Close(scope) => scope.label(&app.context),
-                _ => "",
-            };
-            let text = format!("{}: {}?", command.title, target);
-            frame.render_widget(
-                Paragraph::new(Line::from(view::label_spans(
-                    &text,
-                    &[],
-                    usize::from(chunks[0].width),
-                )))
-                .style(palette.base_style()),
-                chunks[0],
-            );
-            frame.render_widget(
-                Paragraph::new("Enter confirms closing; Esc goes back").style(palette.base_style()),
-                chunks[2],
-            );
+        Mode::Confirm { .. } => {
+            if let Some((item, Step::Confirm { message, help })) = app.active_step() {
+                let text = registry::format_text(message, item, &app.context);
+                frame.render_widget(
+                    Paragraph::new(Line::from(view::label_spans(
+                        &text,
+                        &[],
+                        usize::from(chunks[0].width),
+                    )))
+                    .style(palette.base_style()),
+                    chunks[0],
+                );
+                frame.render_widget(
+                    Paragraph::new(help.as_str()).style(palette.base_style()),
+                    chunks[2],
+                );
+            }
         }
     }
     (app.ok_area, app.cancel_area) = view::render_actions(
@@ -248,21 +206,21 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
     );
 }
 
-pub fn render_loading(frame: &mut Frame<'_>, palette: Palette) -> Rect {
+pub fn render_loading(frame: &mut Frame<'_>, palette: Palette, screen: &ScreenSpec) -> Rect {
     frame.render_widget(Paragraph::new("").style(palette.base_style()), frame.area());
-    view::render_loading(frame, frame.area(), palette, "Loading commands…")
+    view::render_loading(frame, frame.area(), palette, &screen.loading)
 }
 
 pub fn run(directory: &Path, theme: Theme) -> Result<Option<Selection>> {
-    run_mode(directory, theme, false)
+    run_mode(directory, theme, "commands")
 }
 
-pub fn run_mode(directory: &Path, mut theme: Theme, tasks: bool) -> Result<Option<Selection>> {
+pub fn run_mode(directory: &Path, mut theme: Theme, screen_key: &str) -> Result<Option<Selection>> {
     let (_screen, mut terminal) = Screen::enter(theme.auto_switch())?;
-    let view: super::cli::View = if directory.join("view.json").exists() {
-        read_json(&directory.join("view.json"))?
+    let screen: ScreenSpec = if directory.join("screen.json").exists() {
+        read_json(&directory.join("screen.json"))?
     } else {
-        super::cli::View::Commands
+        registry::Registry::bundled()?.screen(screen_key)?
     };
     let mut pending = Vec::new();
     let catalog: Catalog = loop {
@@ -272,13 +230,7 @@ pub fn run_mode(directory: &Path, mut theme: Theme, tasks: bool) -> Result<Optio
         }
         let mut cancel_area = Rect::default();
         terminal.draw(|frame| {
-            cancel_area = if tasks {
-                view::render_loading(frame, frame.area(), theme.palette(), "Loading tasks…")
-            } else if view.branches() {
-                view::render_loading(frame, frame.area(), theme.palette(), "Fetching branches…")
-            } else {
-                render_loading(frame, theme.palette())
-            };
+            cancel_area = render_loading(frame, theme.palette(), &screen);
         })?;
         if event::poll(Duration::from_millis(20))? {
             let input = event::read()?;
@@ -312,9 +264,8 @@ pub fn run_mode(directory: &Path, mut theme: Theme, tasks: bool) -> Result<Optio
         catalog.naming,
         theme,
         catalog.warning,
+        catalog.screen,
     );
-    app.tasks = catalog.tasks;
-    app.view = catalog.view;
     app.set_recent_ids(catalog.recent_ids);
     for event in pending {
         match app.handle(event) {
