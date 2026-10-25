@@ -6,12 +6,12 @@ use herdrpp::tasks::config::Task;
 use std::path::Path;
 
 fn task(root: &str, label: &str, id: &str) -> Item {
-    Item {
-        id: id.into(),
-        title: label.into(),
-        source: "Task".into(),
-        description: "true".into(),
-        command: Command::Task {
+    Item::new(
+        id.into(),
+        label.into(),
+        "Task".into(),
+        "true".into(),
+        Command::Task {
             root: root.into(),
             task: Task {
                 label: label.into(),
@@ -20,13 +20,14 @@ fn task(root: &str, label: &str, id: &str) -> Item {
                 new_tab: true,
             },
         },
-    }
+    )
+    .unwrap()
 }
 
 #[test]
 fn history_persists_deduplicates_and_resolves_only_available_commands() {
     let directory = tempfile::tempdir().unwrap();
-    let items = catalog::builtins(&Context::default());
+    let items = catalog::builtins(&Context::default()).unwrap();
     let search = UsageKey::for_item(&items[0]);
     History::record(directory.path(), search.clone()).unwrap();
     History::record(
@@ -75,7 +76,7 @@ fn missing_history_is_empty_and_malformed_history_can_be_replaced_on_next_launch
     );
     std::fs::write(directory.path().join("palette-history.json"), "broken").unwrap();
     assert!(History::load(directory.path()).is_err());
-    let items = catalog::builtins(&Context::default());
+    let items = catalog::builtins(&Context::default()).unwrap();
     History::record(directory.path(), UsageKey::for_item(&items[0])).unwrap();
     assert_eq!(
         History::load(directory.path()).unwrap().recent_ids(&items),

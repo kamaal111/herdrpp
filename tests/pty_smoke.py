@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import termios
 import time
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -147,6 +148,13 @@ def palette_case(keys, expected, loading=False, recent_ids=None):
                                    description="", command={"Rename":"Tab"}),
                               dict(id="herdr:tab_create", title="New Tab", source="Herdr",
                                    description="", command={"Create":"Tab"})])
+        registry = tomllib.loads((ROOT / "src/palette/commands.toml").read_text())
+        catalog["screen"] = registry["screens"]["commands"]
+        definitions = {command["id"]: command for command in registry["commands"]}
+        for item in catalog["items"]:
+            definition = definitions[item["id"]]
+            item["behavior"] = {key: definition[key] for key in ("steps", "search", "detail", "history") if key in definition}
+            item["behavior"]["target"] = definition["handler"].get("scope")
         if not loading:
             (directory / "catalog.json").write_text(json.dumps(catalog))
         config = directory / "herdr.toml"

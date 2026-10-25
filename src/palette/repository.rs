@@ -21,15 +21,17 @@ pub fn directory_from_snapshot(snapshot: &Value, context: &Context) -> Option<Pa
 }
 
 pub fn item(directory: &Path, cancelled: &AtomicBool) -> Result<Option<Item>> {
-    Ok(
-        crate::repository::repository_url(directory, cancelled)?.map(|url| Item {
-            id: "herdr:open_repo".into(),
-            title: "Open Repo".into(),
-            source: "Herdr".into(),
-            description: String::new(),
-            command: Command::OpenRepo { url },
-        }),
-    )
+    crate::repository::repository_url(directory, cancelled)?
+        .map(|url| {
+            Item::new(
+                "herdr:open_repo".into(),
+                String::new(),
+                "Herdr".into(),
+                String::new(),
+                Command::OpenRepo { url },
+            )
+        })
+        .transpose()
 }
 
 pub fn open_url(url: &str) -> Result<()> {

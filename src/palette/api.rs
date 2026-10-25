@@ -129,10 +129,11 @@ pub fn rename_request(
     input: Option<&str>,
 ) -> Result<(String, Value)> {
     let label = input.context("rename requires a name")?;
-    ensure!(
-        !label.trim().is_empty() && !label.chars().any(char::is_control),
-        "name must contain visible text without control characters"
-    );
+    super::naming::validate_name(
+        label,
+        super::naming::NamePolicy::Visible,
+        "name must contain visible text without control characters",
+    )?;
     let id = scope.id(context).context("command target is unavailable")?;
     let mut params = serde_json::Map::new();
     params.insert(format!("{}_id", scope.cli()), json!(id));
@@ -147,10 +148,11 @@ pub fn create_request(
     input: Option<&str>,
 ) -> Result<(String, Value)> {
     let input = input.context("creation requires a name prompt")?;
-    ensure!(
-        !input.chars().any(char::is_control),
-        "name must not contain control characters"
-    );
+    super::naming::validate_name(
+        input,
+        super::naming::NamePolicy::Automatic,
+        "name must not contain control characters",
+    )?;
     let trimmed = input.trim();
     let label = (!trimmed.is_empty() && trimmed != naming.suggestion(scope)).then_some(trimmed);
     let workspace_id = context

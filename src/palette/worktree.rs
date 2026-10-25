@@ -73,30 +73,9 @@ pub fn root(directory: &Path, cancelled: &AtomicBool) -> Result<PathBuf> {
     std::fs::canonicalize(root).context("resolve worktree repository")
 }
 
-pub fn actions(root: &Path) -> Vec<Item> {
-    let invocation_branch =
-        inspect(root, &["branch", "--show-current"], &AtomicBool::new(false)).unwrap_or_default();
-    [
-        (true, "herdr:worktree_new", "New Worktree"),
-        (
-            false,
-            "herdr:worktree_existing",
-            "Add Existing Branch as Worktree",
-        ),
-    ]
-    .into_iter()
-    .map(|(new, id, title)| Item {
-        id: id.into(),
-        title: title.into(),
-        source: "Herdr".into(),
-        description: "Create or open a worktree in this workspace’s repository group".into(),
-        command: Command::ChooseWorktree {
-            root: root.into(),
-            new,
-            invocation_branch: invocation_branch.clone(),
-        },
-    })
-    .collect()
+pub fn actions(root: &Path, context: &Context, cancelled: &AtomicBool) -> Result<Vec<Item>> {
+    let branch = inspect(root, &["branch", "--show-current"], cancelled)?;
+    super::registry::Registry::bundled()?.worktree_actions(root, &branch, context)
 }
 
 pub fn fetch(root: &Path, cancelled: &AtomicBool) -> Result<String> {
@@ -171,31 +150,33 @@ pub fn branch_items(
     branches: &[Branch],
     new: bool,
     preferred: Option<&str>,
-) -> Vec<Item> {
+) -> Result<Vec<Item>> {
     let preferred = preferred.and_then(|name| preferred_branch(branches, name));
     let mut items: Vec<_> = branches
         .iter()
-        .map(|branch| Item {
-            id: format!("worktree:{}", branch.reference),
-            title: branch.label(),
-            source: if branch.remote.is_some() {
-                "Remote"
-            } else {
-                "Local"
-            }
-            .into(),
-            description: branch.reference.clone(),
-            command: Command::WorktreeBranch {
-                root: root.into(),
-                branch: branch.clone(),
-                new,
-            },
+        .map(|branch| {
+            Item::new(
+                format!("worktree:{}", branch.reference),
+                branch.label(),
+                if branch.remote.is_some() {
+                    "Remote"
+                } else {
+                    "Local"
+                }
+                .into(),
+                branch.reference.clone(),
+                Command::WorktreeBranch {
+                    root: root.into(),
+                    branch: branch.clone(),
+                    new,
+                },
+            )
         })
-        .collect();
+        .collect::<Result<_>>()?;
     if let Some(preferred) = preferred {
         items.sort_by_key(|item| item.id != format!("worktree:{}", preferred.reference));
     }
-    items
+    Ok(items)
 }
 
 fn preferred_branch<'a>(branches: &'a [Branch], name: &str) -> Option<&'a Branch> {
@@ -242,7 +223,7 @@ pub fn load(
     {
         warning.push_str(" Preferred base is unavailable or ambiguous; choose a branch.");
     }
-    let items = branch_items(root, &branches, new, preferred.as_deref());
+    let items = branch_items(root, &branches, new, preferred.as_deref())?;
     Ok((items, (!warning.is_empty()).then_some(warning)))
 }
 

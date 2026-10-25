@@ -92,8 +92,9 @@ fn main() -> Result<()> {
         },
         Theme::parse("[theme]\nname = 'dracula'\n")?,
         None,
+        herdrpp::palette::registry::Registry::bundled()?.screen("commands")?,
     );
-    palette.items = herdrpp::palette::catalog::builtins(&palette.context);
+    palette.items = herdrpp::palette::catalog::builtins(&palette.context)?;
     palette.set_query(
         match case.as_str() {
             "palette-search" | "palette-narrow" => "spl rgt",
@@ -123,17 +124,17 @@ fn main() -> Result<()> {
             args: vec!["dev-server".into()],
             new_tab: true,
         };
-        palette.tasks = true;
-        palette.items = vec![herdrpp::palette::catalog::Item {
-            id: "task:0".into(),
-            title: task.label.clone(),
-            source: "Task".into(),
-            description: "just dev-server".into(),
-            command: herdrpp::palette::catalog::Command::Task {
+        palette.screen = herdrpp::palette::registry::Registry::bundled()?.screen("tasks")?;
+        palette.items = vec![herdrpp::palette::catalog::Item::new(
+            "task:0".into(),
+            task.label.clone(),
+            "Task".into(),
+            "just dev-server".into(),
+            herdrpp::palette::catalog::Command::Task {
                 task,
                 root: "/project".into(),
             },
-        }];
+        )?];
         palette.set_query("dev".into());
         if case == "tasks-diagnostics" {
             palette.items.clear();
@@ -145,10 +146,7 @@ fn main() -> Result<()> {
         case.as_str(),
         "palette-branches" | "palette-worktree-name" | "palette-branch-warning"
     ) {
-        use herdrpp::palette::{
-            cli::View,
-            worktree::{Branch, branch_items},
-        };
+        use herdrpp::palette::worktree::{Branch, branch_items};
         let branches = [
             Branch {
                 reference: "refs/heads/main".into(),
@@ -171,11 +169,9 @@ fn main() -> Result<()> {
             &branches,
             true,
             Some("feature/palette"),
-        );
-        palette.view = View::BaseBranches {
-            root: "/project".into(),
-            invocation_branch: "feature/palette".into(),
-        };
+        )?;
+        palette.screen =
+            herdrpp::palette::registry::Registry::bundled()?.screen("base_branches")?;
         palette.set_query(String::new());
         if case == "palette-worktree-name" {
             palette.handle(terminal_input::event::Event::Key(
@@ -195,7 +191,7 @@ fn main() -> Result<()> {
     }
     terminal.draw(|frame| {
         if case == "palette-loading" {
-            herdrpp::palette::ui::render_loading(frame, palette.theme.palette());
+            herdrpp::palette::ui::render_loading(frame, palette.theme.palette(), &palette.screen);
         } else if case.starts_with("palette-") || case.starts_with("tasks-") {
             herdrpp::palette::ui::render(frame, &mut palette);
         } else if case == "loading" {

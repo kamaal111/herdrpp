@@ -20,7 +20,7 @@ fn app() -> App {
     .unwrap();
     App::new(
         context.clone(),
-        catalog::builtins(&context),
+        catalog::builtins(&context).unwrap(),
         Naming {
             tab_name: "Codex".into(),
             workspace_name: "herdrpp".into(),
@@ -30,6 +30,10 @@ fn app() -> App {
         },
         Theme::default(),
         None,
+        herdrpp::palette::registry::Registry::bundled()
+            .unwrap()
+            .screen("commands")
+            .unwrap(),
     )
 }
 fn key(code: KeyCode) -> Event {
@@ -63,16 +67,19 @@ fn typing_paste_and_backspace_filter_and_empty_enter_does_nothing() {
 #[test]
 fn view_pull_request_enter_executes_without_a_prompt() {
     let mut app = app();
-    app.items.push(catalog::Item {
-        id: "herdr:view_pull_request".into(),
-        title: "View Pull Request".into(),
-        source: "Herdr".into(),
-        description: String::new(),
-        command: catalog::Command::ViewPullRequest {
-            number: 123,
-            directory: "/projects/herdrpp".into(),
-        },
-    });
+    app.items.push(
+        catalog::Item::new(
+            "herdr:view_pull_request".into(),
+            "View Pull Request".into(),
+            "Herdr".into(),
+            String::new(),
+            catalog::Command::ViewPullRequest {
+                number: 123,
+                directory: "/projects/herdrpp".into(),
+            },
+        )
+        .unwrap(),
+    );
     app.set_query("View Pull Request".into());
     assert_eq!(
         app.handle(key(KeyCode::Enter)),

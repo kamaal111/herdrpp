@@ -45,10 +45,14 @@ fn command_palette_uses_the_same_search_surface_without_an_inner_panel() {
     let context = herdrpp::palette::catalog::Context::default();
     let mut app = herdrpp::palette::app::App::new(
         context.clone(),
-        herdrpp::palette::catalog::builtins(&context),
+        herdrpp::palette::catalog::builtins(&context).unwrap(),
         herdrpp::palette::naming::Naming::default(),
         herdrpp::picker::theme::Theme::default(),
         None,
+        herdrpp::palette::registry::Registry::bundled()
+            .unwrap()
+            .screen("commands")
+            .unwrap(),
     );
     let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
     terminal

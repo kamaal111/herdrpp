@@ -65,7 +65,11 @@ pub fn root(api: &Herdr, context: &Context) -> Result<PathBuf> {
     fs::canonicalize(path).context("resolve checkout root")
 }
 
-pub fn load(api: &Herdr, context: &Context) -> Catalog {
+pub fn load(
+    api: &Herdr,
+    context: &Context,
+    screen: crate::palette::registry::Screen,
+) -> Result<Catalog> {
     let loaded = (|| -> Result<(Vec<Item>, Option<String>)> {
         let root = root(api, context)?;
         let discovered = discover(&root)?;
@@ -119,32 +123,34 @@ pub fn load(api: &Herdr, context: &Context) -> Catalog {
         let items = tasks
             .into_iter()
             .enumerate()
-            .map(|(index, task)| Item {
-                id: format!("task:{index}"),
-                title: task.label.clone(),
-                source: "Task".into(),
-                description: task.command.clone(),
-                command: Command::Task {
-                    task,
-                    root: root.clone(),
-                },
+            .map(|(index, task)| {
+                Item::new(
+                    format!("task:{index}"),
+                    task.label.clone(),
+                    String::new(),
+                    task.command.clone(),
+                    Command::Task {
+                        task,
+                        root: root.clone(),
+                    },
+                )
             })
-            .collect();
+            .collect::<Result<_>>()?;
         Ok((items, None))
     })();
     let (items, warning) = match loaded {
         Ok(loaded) => loaded,
         Err(error) => (vec![], Some(format!("Cannot load tasks\n\n{error:#}"))),
     };
-    Catalog {
-        view: crate::palette::cli::View::Commands,
+    Ok(Catalog {
+        screen,
+        payload: crate::palette::providers::Payload::None,
         recent_ids: vec![],
         context: context.clone(),
         naming: crate::palette::naming::Naming::default(),
         items,
         warning,
-        tasks: true,
-    }
+    })
 }
 
 #[cfg(test)]

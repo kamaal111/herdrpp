@@ -1,6 +1,7 @@
 use super::{
-    catalog::{self, Command, Context, Hit, Item},
+    catalog::{self, Context, Hit, Item},
     naming::Naming,
+    registry::{self, Screen, Step},
 };
 use crate::search::input::{InputChange, TextInput};
 use crate::{picker::theme::Theme, search::matcher::FieldMatcher};
@@ -39,9 +40,11 @@ pub enum Mode {
 }
 
 pub struct App {
-    pub view: super::cli::View,
+    pub screen: Screen,
+    step: usize,
+    submitted_input: Option<String>,
+    confirmed: bool,
     pub prompt_error: Option<String>,
-    pub tasks: bool,
     pub diagnostics_offset: u16,
     pub diagnostics_max: u16,
     pub context: Context,
@@ -69,11 +72,14 @@ impl App {
         naming: Naming,
         theme: Theme,
         warning: Option<String>,
+        screen: Screen,
     ) -> Self {
         let mut app = Self {
-            view: super::cli::View::Commands,
+            screen,
+            step: 0,
+            submitted_input: None,
+            confirmed: false,
             prompt_error: None,
-            tasks: false,
             diagnostics_offset: 0,
             diagnostics_max: 0,
             context,
@@ -142,46 +148,92 @@ impl App {
         self.ok_area = Rect::default();
         self.cancel_area = Rect::default();
     }
+    pub fn active_step(&self) -> Option<(&Item, &Step)> {
+        let item = match self.mode {
+            Mode::Name { item, .. } | Mode::Confirm { item } => item,
+            Mode::Search => return None,
+        };
+        let item = self.items.get(item)?;
+        Some((item, item.behavior.steps.get(self.step)?))
+    }
+    fn begin_step(&mut self, item: usize) -> Action {
+        let definition = &self.items[item];
+        self.prompt_error = None;
+        match definition.behavior.steps.get(self.step) {
+            Some(Step::Text {
+                initial,
+                select_all,
+                ..
+            }) => {
+                let value = self.submitted_input.clone().unwrap_or_else(|| {
+                    registry::initial_value(*initial, definition.behavior.target, &self.naming)
+                });
+                self.mode = Mode::Name {
+                    item,
+                    input: TextInput::new(value, *select_all && self.submitted_input.is_none()),
+                    error: false,
+                };
+            }
+            Some(Step::Confirm { .. }) => self.mode = Mode::Confirm { item },
+            Some(Step::Choice { .. }) | None => {
+                self.step = self.step.saturating_sub(1);
+                return Action::Execute(Selection {
+                    id: definition.id.clone(),
+                    input: self.submitted_input.clone(),
+                    confirmed: self.confirmed,
+                });
+            }
+        }
+        self.clear_hits();
+        Action::Continue
+    }
     fn cancel(&mut self) -> Action {
-        if self.mode == Mode::Search {
-            Action::Cancel
-        } else {
-            self.mode = Mode::Search;
-            self.clear_hits();
-            Action::Continue
+        match self.mode {
+            Mode::Search => Action::Cancel,
+            Mode::Name { item, .. } | Mode::Confirm { item } if self.step > 0 => {
+                self.step -= 1;
+                self.confirmed = false;
+                self.begin_step(item)
+            }
+            _ => {
+                self.mode = Mode::Search;
+                self.clear_hits();
+                Action::Continue
+            }
         }
     }
     fn activate(&mut self) -> Action {
         match &mut self.mode {
-            Mode::Name {
-                item, input, error, ..
-            } => {
-                if let Command::WorktreeBranch {
-                    root, new: true, ..
-                } = &self.items[*item].command
-                    && let Err(reason) = super::worktree::validate_name(root, input.text())
-                {
+            Mode::Name { item, input, error } => {
+                let Some(Step::Text {
+                    validator,
+                    error: message,
+                    ..
+                }) = self.items[*item].behavior.steps.get(self.step)
+                else {
+                    return Action::Continue;
+                };
+                if let Err(reason) = registry::validate_input(
+                    *validator,
+                    &self.items[*item].command,
+                    input.text(),
+                    message,
+                ) {
                     *error = true;
                     self.prompt_error = Some(reason.to_string());
                     return Action::Continue;
                 }
-                if matches!(self.items[*item].command, Command::Rename(_))
-                    && input.text().trim().is_empty()
-                {
-                    *error = true;
-                    return Action::Continue;
-                }
-                Action::Execute(Selection {
-                    id: self.items[*item].id.clone(),
-                    input: Some(input.text().to_owned()),
-                    confirmed: false,
-                })
+                self.submitted_input = Some(input.text().into());
+                let item = *item;
+                self.step += 1;
+                self.begin_step(item)
             }
-            Mode::Confirm { item } => Action::Execute(Selection {
-                id: self.items[*item].id.clone(),
-                input: None,
-                confirmed: true,
-            }),
+            Mode::Confirm { item } => {
+                let item = *item;
+                self.confirmed = true;
+                self.step += 1;
+                self.begin_step(item)
+            }
             Mode::Search => {
                 let Some(item) = self
                     .selected
@@ -190,46 +242,10 @@ impl App {
                 else {
                     return Action::Continue;
                 };
-                match self.items[item].command {
-                    Command::WorktreeBranch { new: true, .. } => {
-                        self.mode = Mode::Name {
-                            item,
-                            input: TextInput::default(),
-                            error: false,
-                        };
-                        self.prompt_error = None;
-                        self.clear_hits();
-                        Action::Continue
-                    }
-                    Command::Rename(scope) | Command::Create(scope) => {
-                        let creating = matches!(self.items[item].command, Command::Create(_));
-                        self.mode = Mode::Name {
-                            item,
-                            input: TextInput::new(
-                                if creating {
-                                    self.naming.suggestion(scope)
-                                } else {
-                                    self.naming.rename_name(scope)
-                                }
-                                .to_owned(),
-                                creating,
-                            ),
-                            error: false,
-                        };
-                        self.clear_hits();
-                        Action::Continue
-                    }
-                    Command::Close(_) => {
-                        self.mode = Mode::Confirm { item };
-                        self.clear_hits();
-                        Action::Continue
-                    }
-                    _ => Action::Execute(Selection {
-                        id: self.items[item].id.clone(),
-                        input: None,
-                        confirmed: false,
-                    }),
-                }
+                self.step = 0;
+                self.submitted_input = None;
+                self.confirmed = false;
+                self.begin_step(item)
             }
         }
     }
@@ -250,7 +266,7 @@ impl App {
         }
     }
     pub fn handle(&mut self, event: Event) -> Action {
-        if self.tasks && self.warning.is_some() {
+        if self.screen.diagnostics && self.warning.is_some() {
             match event {
                 Event::ThemeModeChanged(appearance) => self.theme.set_appearance(appearance),
                 Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
@@ -296,7 +312,7 @@ impl App {
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
                     KeyCode::Char('c') if ctrl => {
-                        return if self.view.branches() {
+                        return if self.screen.abort_flow {
                             Action::Abort
                         } else {
                             Action::Cancel

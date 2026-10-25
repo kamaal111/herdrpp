@@ -21,7 +21,8 @@ with (root / "calls").open("a") as log:
 if args == ["api", "snapshot"]:
     result = {"snapshot":json.loads((root / "snapshot").read_text())}
 elif args[:3] == ["plugin", "pane", "open"]:
-    (root / "request").write_text(args[args.index("--env")+1].split("=",1)[1])
+    (root / "request-next").write_text(args[args.index("--env")+1].split("=",1)[1])
+    (root / "request-next").replace(root / "request")
     result = {}
 else:
     result = {}
@@ -207,7 +208,7 @@ class TestTaskOwner(TaskOwnerHarness):
         directory = self.start()
         catalog = json.loads((directory / "catalog.json").read_text())
         assert catalog["items"] == []
-        assert catalog["tasks"] is True
+        assert catalog["screen"]["diagnostics"] is True
         assert str(self.task_file) in catalog["warning"]
         assert "Remove the quotes" in catalog["warning"]
         assert "duplicates Task 1" in catalog["warning"]

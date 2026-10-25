@@ -1,0 +1,203 @@
+# Bundled palette declarations. Handlers, validators and providers are typed Rust bindings.
+# Adding a command that reuses a handler requires only another entry here.
+
+[screens.commands]
+title = "Command Palette"
+search_label = "Search commands"
+empty = "No matching commands"
+loading = "Loading commands…"
+help = "↑↓/Ctrl+P,N Commands  Enter Run"
+entrypoint = "command-palette"
+provider = "commands"
+
+[screens.tasks]
+title = "Task Palette"
+search_label = "Search tasks"
+empty = "No matching tasks"
+loading = "Loading tasks…"
+help = "↑↓/Ctrl+P,N Tasks  Enter Run"
+entrypoint = "task-palette"
+provider = "tasks"
+diagnostics = true
+
+[screens.existing_branches]
+title = "Command Palette"
+search_label = "Choose existing branch"
+empty = "No matching branches"
+loading = "Fetching branches…"
+help = "↑↓/Ctrl+P,N Branches  Enter Select"
+entrypoint = "command-palette"
+provider = "branches"
+history = false
+abort_flow = true
+
+[screens.base_branches]
+title = "Command Palette"
+search_label = "Choose base branch"
+empty = "No matching branches"
+loading = "Fetching branches…"
+help = "↑↓/Ctrl+P,N Branches  Enter Select"
+entrypoint = "command-palette"
+provider = "branches"
+history = false
+abort_flow = true
+
+[[commands]]
+id = "herdr:search_workspaces"
+title = "Search Workspaces"
+handler = { kind = "search_workspaces" }
+
+[[commands]]
+id = "herdr:workspace_create"
+title = "New Workspace"
+requires = ["workspace"]
+handler = { kind = "create", scope = "workspace" }
+steps = [{ kind = "text", key = "name", initial = "suggested_name", validator = "automatic_name", select_all = true, help = "Enter Create  Esc Back" }]
+
+[[commands]]
+id = "herdr:workspace_rename"
+title = "Rename Workspace"
+requires = ["workspace"]
+handler = { kind = "rename", scope = "workspace" }
+steps = [{ kind = "text", key = "name", initial = "current_label", validator = "visible_name" }]
+
+[[commands]]
+id = "herdr:workspace_close"
+title = "Close Workspace"
+requires = ["workspace"]
+handler = { kind = "close", scope = "workspace" }
+steps = [{ kind = "confirm", message = "{title}: {target}?" }]
+
+[[commands]]
+id = "herdr:tab_create"
+title = "New Tab"
+requires = ["workspace"]
+handler = { kind = "create", scope = "tab" }
+steps = [{ kind = "text", key = "name", initial = "suggested_name", validator = "automatic_name", select_all = true, help = "Enter Create  Esc Back" }]
+
+[[commands]]
+id = "herdr:tab_rename"
+title = "Rename Tab"
+requires = ["tab"]
+handler = { kind = "rename", scope = "tab" }
+steps = [{ kind = "text", key = "name", initial = "current_label", validator = "visible_name" }]
+
+[[commands]]
+id = "herdr:tab_close"
+title = "Close Tab"
+requires = ["tab"]
+handler = { kind = "close", scope = "tab" }
+steps = [{ kind = "confirm", message = "{title}: {target}?" }]
+
+[[commands]]
+id = "herdr:pane_rename"
+title = "Rename Pane"
+requires = ["pane"]
+handler = { kind = "rename", scope = "pane" }
+steps = [{ kind = "text", key = "name", initial = "current_label", validator = "visible_name" }]
+
+[[commands]]
+id = "herdr:pane_close"
+title = "Close Pane"
+requires = ["pane"]
+handler = { kind = "close", scope = "pane" }
+steps = [{ kind = "confirm", message = "{title}: {target}?" }]
+
+[[commands]]
+id = "herdr:split_right"
+title = "Split Pane Right"
+requires = ["pane"]
+handler = { kind = "split", direction = "right" }
+
+[[commands]]
+id = "herdr:split_down"
+title = "Split Pane Down"
+requires = ["pane"]
+handler = { kind = "split", direction = "down" }
+
+[[commands]]
+id = "herdr:focus_left"
+title = "Focus Pane Left"
+requires = ["pane"]
+handler = { kind = "focus", direction = "left" }
+
+[[commands]]
+id = "herdr:focus_right"
+title = "Focus Pane Right"
+requires = ["pane"]
+handler = { kind = "focus", direction = "right" }
+
+[[commands]]
+id = "herdr:focus_up"
+title = "Focus Pane Up"
+requires = ["pane"]
+handler = { kind = "focus", direction = "up" }
+
+[[commands]]
+id = "herdr:focus_down"
+title = "Focus Pane Down"
+requires = ["pane"]
+handler = { kind = "focus", direction = "down" }
+
+[[commands]]
+id = "herdr:zoom"
+title = "Toggle Pane Zoom"
+requires = ["pane"]
+handler = { kind = "zoom" }
+
+[[commands]]
+id = "herdr:open_repo"
+title = "Open Repo"
+requires = ["repository"]
+handler = { kind = "open_repo" }
+
+[[commands]]
+id = "herdr:view_pull_request"
+title = "View Pull Request"
+requires = ["workspace"]
+handler = { kind = "view_pull_request" }
+
+[[commands]]
+id = "herdr:worktree_new"
+title = "New Worktree"
+description = "Create or open a worktree in this workspace’s repository group"
+requires = ["workspace", "repository"]
+handler = { kind = "choose_worktree", new = true }
+steps = [{ kind = "choice", provider = "branches", screen = "base_branches" }]
+
+[[commands]]
+id = "herdr:worktree_existing"
+title = "Add Existing Branch as Worktree"
+description = "Create or open a worktree in this workspace’s repository group"
+requires = ["workspace", "repository"]
+handler = { kind = "choose_worktree", new = false }
+steps = [{ kind = "choice", provider = "branches", screen = "existing_branches" }]
+
+# Dynamic providers fill titles and typed payloads; these templates own behavior.
+[[commands]]
+id = "template:worktree_new_branch"
+template = true
+handler = { kind = "worktree_branch", new = true }
+search = "source_title"
+steps = [{ kind = "text", key = "name", validator = "new_branch", message = "New branch name · Base: {title}", help = "Enter Create  Esc Back" }]
+
+[[commands]]
+id = "template:worktree_existing_branch"
+template = true
+handler = { kind = "worktree_branch", new = false }
+search = "source_title"
+
+[[commands]]
+id = "template:task"
+template = true
+source = "Task"
+handler = { kind = "task" }
+search = "title"
+history = "task"
+
+[[commands]]
+id = "template:plugin"
+template = true
+handler = { kind = "plugin" }
+detail = "id"
+

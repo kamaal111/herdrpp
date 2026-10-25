@@ -19,7 +19,7 @@ fn app() -> App {
     .unwrap();
     App::new(
         context.clone(),
-        catalog::builtins(&context),
+        catalog::builtins(&context).unwrap(),
         Naming {
             tab_name: "Codex".into(),
             tab_suggestion: "3".into(),
@@ -27,6 +27,10 @@ fn app() -> App {
         },
         Theme::default(),
         None,
+        herdrpp::palette::registry::Registry::bundled()
+            .unwrap()
+            .screen("commands")
+            .unwrap(),
     )
 }
 
