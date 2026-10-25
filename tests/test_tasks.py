@@ -143,9 +143,23 @@ class TestTaskOwner(TaskOwnerHarness):
 
     def test_same_tab_uses_idle_opening_pane_and_completed_task_reuses_it(self):
         self.task_file.write_text('[{"label":"dev","command":"true","new_tab":false}]')
+        self.snapshot["panes"].insert(0, self.pane("w2:p9", "w2:t7"))
+        self.save_snapshot()
         assert self.launch() == "w2:p8"
         assert self.launch() == "w2:p8"
         assert not any(r["method"] in ("tab.create", "pane.split") for r in self.requests)
+        assert not any("ctrl+c" in r["params"].get("keys", []) for r in self.requests)
+
+    @pytest.mark.parametrize("tab,workspace", [("w2:t9", "w2"), ("w3:t9", "w3")])
+    def test_same_tab_does_not_take_idle_panes_from_other_tabs_or_workspaces(self, tab, workspace):
+        self.task_file.write_text('[{"label":"dev","command":"true","new_tab":false}]')
+        self.busy.add("w2:p8")
+        self.snapshot["workspaces"].append({"workspace_id":"w3", "worktree":{"checkout_path":str(self.checkout)}})
+        self.snapshot["tabs"].append({"tab_id":tab,"workspace_id":workspace})
+        self.snapshot["panes"].append(self.pane("other:p9", tab, workspace))
+        self.save_snapshot()
+        assert self.launch() not in ("w2:p8", "other:p9")
+        assert len([r for r in self.requests if r["method"] == "pane.split"]) == 1
         assert not any("ctrl+c" in r["params"].get("keys", []) for r in self.requests)
 
     def test_same_tab_uses_another_idle_pane_without_interrupting_busy_opening_pane(self):
@@ -317,12 +331,60 @@ class TestTaskOwner(TaskOwnerHarness):
         assert "checkout with spaces" in text
         assert "sources" not in text
 
-    def test_reserved_idle_task_pane_is_not_taken_by_another_task(self):
+    def test_completed_task_pane_transfers_ownership_and_restarts_only_current_owner(self):
         self.task_file.write_text('[{"label":"first","command":"true","new_tab":false}]')
-        first = self.launch()
+        assert self.launch() == "w2:p8"
         self.task_file.write_text('[{"label":"second","command":"true","new_tab":false}]')
-        assert self.launch() != first
+        assert self.launch() == "w2:p8"
+        self.task_file.write_text('[{"label":"third","command":"true","new_tab":false}]')
+        assert self.launch() == "w2:p8"
+        state = next((self.root / "plugin-state").rglob("tasks.json"))
+        records = json.loads(state.read_text())
+        assert [(r["label"], r["pane"]) for r in records] == [("third", "w2:p8")]
+        assert not any(r["method"] in ("tab.create", "pane.split") for r in self.requests)
+        assert not any("ctrl+c" in r["params"].get("keys", []) for r in self.requests)
+        self.busy.add("w2:p8")
+        assert self.launch() == "w2:p8"
+        interrupts = [r["params"]["pane_id"] for r in self.requests if r["params"].get("keys") == ["ctrl+c"]]
+        assert interrupts == ["w2:p8"]
+
+    def test_displaced_task_does_not_interrupt_new_owner(self):
+        self.task_file.write_text('[{"label":"build","command":"true","new_tab":false}]')
+        assert self.launch() == "w2:p8"
+        self.task_file.write_text('[{"label":"test","command":"true","new_tab":false}]')
+        assert self.launch() == "w2:p8"
+        self.busy.add("w2:p8")
+        self.task_file.write_text('[{"label":"build","command":"true","new_tab":false}]')
+        assert self.launch() != "w2:p8"
+        assert "w2:p8" in self.busy
+        assert not any("ctrl+c" in r["params"].get("keys", []) for r in self.requests)
+        assert len([r for r in self.requests if r["method"] == "pane.send_text" and r["params"]["pane_id"] == "w2:p8"]) == 2
         assert len([r for r in self.requests if r["method"] == "pane.split"]) == 1
+
+    @pytest.mark.parametrize("state", ["busy", "unknown"])
+    def test_unavailable_task_pane_is_skipped_for_another_idle_pane(self, state):
+        self.task_file.write_text('[{"label":"first","command":"true","new_tab":false}]')
+        assert self.launch() == "w2:p8"
+        getattr(self, state).add("w2:p8")
+        self.snapshot["panes"].append(self.pane("w2:p9", "w2:t7"))
+        self.save_snapshot()
+        self.task_file.write_text('[{"label":"second","command":"true","new_tab":false}]')
+        assert self.launch() == "w2:p9"
+        assert not any(r["method"] in ("tab.create", "pane.split") for r in self.requests)
+        assert not any("ctrl+c" in r["params"].get("keys", []) for r in self.requests)
+
+    def test_displaced_new_tab_task_allocates_a_new_tab(self):
+        first = self.launch()
+        tab = self.snapshot["tabs"][-1]["tab_id"]
+        self.env["HERDR_PLUGIN_CONTEXT_JSON"] = json.dumps({"workspace_id":"w2","tab_id":tab,"focused_pane_id":first})
+        self.task_file.write_text('[{"label":"second","command":"true","new_tab":false}]')
+        assert self.launch() == first
+        self.busy.add(first)
+        self.task_file.write_text('[{"label":"dev","command":"true"}]')
+        assert self.launch() != first
+        assert first in self.busy
+        assert len([r for r in self.requests if r["method"] == "tab.create"]) == 2
+        assert not any("ctrl+c" in r["params"].get("keys", []) for r in self.requests)
 
     def test_identical_task_labels_in_different_workspaces_get_distinct_destinations(self):
         first = self.launch()

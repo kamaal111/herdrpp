@@ -330,9 +330,10 @@ reload. Missing and empty files show the expected path and an example.
 
 By default, a task opens and focuses a new tab named after its label. With
 `new_tab: false`, it uses the opening tab's idle shell, preferring the opening
-pane, or splits right when no shell is free. Panes reserved for other tasks are
-excluded. An idle shell's pending input is cleared before execution without
-sending Ctrl+C, so a new pane can finish loading its normal startup files.
+pane, or splits right when no shell is free. Idle panes previously used by other
+tasks can be reused; ownership transfers to the new task. An idle shell's
+pending input is cleared before execution without sending Ctrl+C, so a new
+pane can finish loading its normal startup files.
 Herdr's configured interactive shell and startup mode remain in effect;
 finishing a task returns to that same shell with its settings intact.
 
@@ -341,6 +342,8 @@ remembered pane, even from another tab. A running process receives Ctrl+C; the
 runner waits up to five seconds for the shell. If it remains busy, the runner
 reports an error and starts no replacement. Completed tasks reuse their pane
 and retain output. Closed destinations are allocated again using `new_tab`.
+If another task takes over an idle destination, its former owner allocates
+again using `new_tab` rather than interrupting the new owner.
 Editing the command retains its destination; renaming the label creates a new
 identity. Detached background processes are outside restart management.
 
