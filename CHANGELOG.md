@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/kamaal111/herdrpp/compare/v0.11.0...v0.11.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* **tasks:** reuse idle panes from completed tasks ([6159013](https://github.com/kamaal111/herdrpp/commit/6159013d85294c6d38cf75aee31038cd41e194d8))
+
 ## [0.11.0](https://github.com/kamaal111/herdrpp/compare/v0.10.2...v0.11.0) (2026-10-25)
 
 
