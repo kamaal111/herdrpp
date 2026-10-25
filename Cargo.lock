@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "herdrpp"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "crossterm",

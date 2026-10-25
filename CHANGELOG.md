@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/kamaal111/herdrpp/compare/v0.12.0...v0.13.0) (2026-10-25)
+
+
+### Features
+
+* **palette:** copy worktree include files on creation ([1f4a706](https://github.com/kamaal111/herdrpp/commit/1f4a706e3be2ed0f79ef34c879881e964fe42b7b))
+
 ## [0.12.0](https://github.com/kamaal111/herdrpp/compare/v0.11.1...v0.12.0) (2026-10-25)
 
 
