@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/kamaal111/herdrpp/compare/v0.11.1...v0.12.0) (2026-10-25)
+
+
+### Features
+
+* **tasks:** accept JSON5, YAML, and TOML configurations ([f4de3b4](https://github.com/kamaal111/herdrpp/commit/f4de3b424ecf009b9e79e03ef5a789d657d1f422))
+
 ## [0.11.1](https://github.com/kamaal111/herdrpp/compare/v0.11.0...v0.11.1) (2026-10-25)
 
 
