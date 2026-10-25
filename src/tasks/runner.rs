@@ -112,7 +112,6 @@ fn allocate(
     socket: &Path,
     context: &Context,
     snapshot: &Value,
-    records: &[Destination],
     root: &Path,
     task: &Task,
 ) -> Result<Destination> {
@@ -152,7 +151,7 @@ fn allocate(
     candidates.sort_by_key(|p| p["pane_id"].as_str() != Some(opening));
     for pane in candidates {
         let id = pane["pane_id"].as_str().context("missing pane ID")?;
-        if !records.iter().any(|d| d.pane == id) && pane_idle(socket, id).unwrap_or(false) {
+        if pane_idle(socket, id).unwrap_or(false) {
             return destination(pane, root, task);
         }
     }
@@ -209,7 +208,8 @@ pub fn execute(
     let index = match existing {
         Some(index) => index,
         None => {
-            let dest = allocate(api, socket, context, &current, &records, root, task)?;
+            let dest = allocate(api, socket, context, &current, root, task)?;
+            records.retain(|d| d.pane != dest.pane);
             records.push(dest);
             records.len() - 1
         }

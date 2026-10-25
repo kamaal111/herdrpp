@@ -933,6 +933,22 @@ class FocusTests(unittest.TestCase):
         self.assertEqual(focus_state(after), self.origin)
         self.assertEqual(layout_state(after), layout_state(self.before))
 
+    def test_different_same_tab_tasks_reuse_the_completed_task_pane(self):
+        self.write_tasks({"label":"build", "command":"printf 'task-%s-ready\\n' 'build'", "new_tab":False})
+        self.open_tasks()
+        self.session.client.send(b"\r")
+        self.wait_command()
+        self.session.client.wait("task-build-ready", absent=("Task Palette",))
+        first = self.snapshot()
+        self.write_tasks({"label":"test", "command":"printf 'task-%s-ready\\n' 'test'", "new_tab":False})
+        self.open_tasks()
+        self.session.client.send(b"\r")
+        self.wait_command()
+        self.session.client.wait("task-test-ready", absent=("Task Palette",))
+        after = self.snapshot()
+        self.assertEqual(focus_state(after), focus_state(first))
+        self.assertEqual(layout_state(after), layout_state(first))
+
     def test_invalid_task_diagnostics_preserve_focus_and_disable_execution(self):
         self.write_tasks({"label":"broken-task", "command":"true", "new_tab":"false", "unknown":1})
         before = self.snapshot()
