@@ -240,6 +240,27 @@ or focused without duplication. Both choosers fetch configured remotes first;
 failed fetches show a warning and leave known refs usable. Escape goes back;
 Ctrl+C cancels the workflow. Opening the command palette alone does not fetch.
 
+To carry local files into newly created worktrees, add `.worktreeinclude` at
+the invoking checkout's root. It uses `.gitignore` syntax, including globs,
+comments, directory patterns, and `!` exclusions:
+
+```gitignore
+.env*
+!.env.production
+config/secrets.json
+```
+
+Only matching gitignored, untracked regular files are copied. Copies are
+independent and come from the checkout that opened the palette, including
+when it is a linked worktree. Patterns also match inside wholly ignored
+directories. Existing destination files and tracked paths are preserved;
+symlinks, special files, nested repositories, and Git metadata are excluded.
+Missing or empty rules do nothing. Setup failures print warnings and keep
+the created worktree and successful copies. Herdr may already have focused
+the new workspace and started its shell before copying finishes. Opening an
+existing checkout does not copy or synchronize files. This behavior applies
+to worktrees created through these palette commands.
+
 **Open Repo** appears when the opening workspace has a detectable repository
 URL in its local Git remotes. It prefers the branch's tracking remote, then a
 sole eligible repository; ambiguous remotes leave the command hidden. It works
