@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/kamaal111/herdrpp/compare/v0.10.2...v0.11.0) (2026-10-25)
+
+
+### Features
+
+* **palette:** create and open Herdr worktrees ([cf28a22](https://github.com/kamaal111/herdrpp/commit/cf28a2205a2766fb7c60a2ce7db469a31b742e4f))
+
 ## [0.10.2](https://github.com/kamaal111/herdrpp/compare/v0.10.1...v0.10.2) (2026-10-23)
 
 
