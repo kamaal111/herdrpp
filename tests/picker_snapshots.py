@@ -35,11 +35,11 @@ CASES = (
     "hierarchical-unfiltered", "flat-search", "no-matches",
     "narrow-search", "scrolled-selection", "light-search",
     "empty-snapshot", "loading", "tiny-terminal", "tab-cycling",
-    "tasks-search", "tasks-diagnostics",
+    "tasks-search", "tasks-diagnostics", "tasks-ignored", "tasks-ignored-narrow", "tasks-ignored-invalid",
     "palette-popup", "palette-search", "palette-empty", "palette-rename", "palette-create", "palette-confirm", "palette-narrow", "palette-loading",
     "palette-branches", "palette-worktree-name", "palette-branch-warning",
 )
-CONTROLLED = {"agent-status-dots", "agent-status-symbols", "tasks-search", "tasks-diagnostics", "empty-snapshot", "loading", "tiny-terminal",
+CONTROLLED = {"agent-status-dots", "agent-status-symbols", "tasks-search", "tasks-diagnostics", "tasks-ignored", "tasks-ignored-narrow", "tasks-ignored-invalid", "empty-snapshot", "loading", "tiny-terminal",
               "palette-search", "palette-empty", "palette-rename", "palette-create", "palette-confirm", "palette-narrow", "palette-loading",
               "palette-branches", "palette-worktree-name", "palette-branch-warning"}
 SHOWCASE_PRS = (

@@ -278,8 +278,73 @@ class TestTaskOwner(TaskOwnerHarness):
         directory = self.start()
         catalog = json.loads((directory / "catalog.json").read_text())
         assert catalog["items"] == []
-        assert str(self.task_file) in catalog["warning"]
+        assert str(self.checkout / ".herdr/tasks.toml") in catalog["warning"]
         assert "Searched the checkout and up to 10 parent folders." in catalog["warning"]
+        self.select(directory, None)
+        assert self.requests == []
+
+    @pytest.mark.parametrize("name,contents", [
+        ("tasks.toml", "[[tasks]]\nlabel='test'\ncommand='cargo test'\nnew_tab=false"),
+        ("tasks.yaml", "tasks:\n  - label: test\n    command: cargo test\n    new_tab: false"),
+        ("tasks.yml", "- label: test\n  command: cargo test\n  new_tab: false"),
+        ("tasks.json", "{tasks: [{label:'test', command:'cargo test', new_tab:false,},],}"),
+        ("tasks.json5", "{tasks: [{label:'test', command:'cargo test', new_tab:false,},],}"),
+    ])
+    def test_all_formats_load_and_launch_from_checkout(self, name, contents):
+        self.task_file.unlink()
+        self.task_file = self.checkout / ".herdr" / name
+        self.task_file.write_text(contents)
+        assert self.launch() == "w2:p8"
+        text = next(r["params"]["text"] for r in self.requests if r["method"] == "pane.send_text")
+        assert "cargo test" in text
+        assert str(self.checkout.resolve()) in text
+
+    @pytest.mark.parametrize("ancestor", [False, True])
+    def test_toml_priority_reports_ignored_files_in_resolved_directory(self, ancestor):
+        folder = self.root if ancestor else self.checkout
+        self.task_file.unlink()
+        directory = folder / ".herdr"
+        directory.mkdir(exist_ok=True)
+        selected = directory / "tasks.toml"
+        selected.write_text("[[tasks]]\nlabel='chosen'\ncommand='true'")
+        for name in ["tasks.yaml", "tasks.yml", "tasks.json", "tasks.json5"]:
+            (directory / name).write_text("invalid ignored content")
+        palette = self.start()
+        catalog = json.loads((palette / "catalog.json").read_text())
+        assert [item["title"] for item in catalog["items"]] == ["chosen"]
+        assert catalog["warning"] is None
+        assert str(selected) in catalog["notice"]
+        for name in ["tasks.yaml", "tasks.yml", "tasks.json", "tasks.json5"]:
+            assert name in catalog["notice"]
+        self.choose(palette)
+        assert any(r["method"] == "pane.send_text" for r in self.requests)
+
+    @pytest.mark.parametrize("contents,diagnostic", [
+        ("tasks = []", "No tasks configured"),
+        ("tasks = 'test'", "tasks: expected an array"),
+        ("[[tasks]", "Invalid TOML"),
+    ])
+    def test_selected_empty_or_invalid_toml_blocks_valid_json_sibling(self, contents, diagnostic):
+        selected = self.task_file.with_name("tasks.toml")
+        selected.write_text(contents)
+        directory = self.start()
+        catalog = json.loads((directory / "catalog.json").read_text())
+        assert catalog["items"] == []
+        assert str(selected) in catalog["warning"]
+        assert diagnostic in catalog["warning"]
+        assert "tasks.json" in catalog["notice"]
+        self.select(directory, None)
+        assert self.requests == []
+
+    def test_unreadable_selected_file_blocks_siblings_and_keeps_notice(self):
+        selected = self.task_file.with_name("tasks.toml")
+        selected.symlink_to("missing-task-file.toml")
+        directory = self.start()
+        catalog = json.loads((directory / "catalog.json").read_text())
+        assert catalog["items"] == []
+        assert str(selected) in catalog["warning"]
+        assert "Cannot read" in catalog["warning"]
+        assert "tasks.json" in catalog["notice"]
         self.select(directory, None)
         assert self.requests == []
 
@@ -310,8 +375,9 @@ class TestTaskOwner(TaskOwnerHarness):
         catalog = json.loads((directory / "catalog.json").read_text())
         assert catalog["items"] == []
         assert "No tasks configured" in catalog["warning"]
-        assert str(self.task_file) in catalog["warning"]
-        assert '"command":"just"' in catalog["warning"]
+        expected_file = self.task_file if contents is not None else self.task_file.with_name("tasks.toml")
+        assert str(expected_file) in catalog["warning"]
+        assert 'just test' in catalog["warning"]
         self.select(directory, None)
         assert self.requests == []
 

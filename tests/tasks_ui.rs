@@ -238,3 +238,60 @@ fn task_search_command_arrows_jump_without_resetting_results() {
     assert_eq!(app.results.len(), 1);
     assert_eq!(app.selected, selected);
 }
+
+#[test]
+fn ignored_file_notice_keeps_search_keyboard_and_mouse_selection_available() {
+    let mut app = task_app();
+    app.notice = Some("Using /project/.herdr/tasks.toml. Ignored: tasks.yaml, tasks.json.".into());
+    let text = draw(&mut app, 80, 20);
+    assert!(text.contains("Ignored: tasks.yaml, tasks.json."));
+    assert!(text.contains("dev server"));
+    app.set_query("dev".into());
+    assert_eq!(app.results.len(), 1);
+    assert!(matches!(
+        app.handle(key(KeyCode::Enter)),
+        Action::Execute(_)
+    ));
+    draw(&mut app, 80, 20);
+    let area = app.hits[0].0;
+    assert!(matches!(
+        app.handle(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: area.x,
+            row: area.y,
+            modifiers: KeyModifiers::NONE,
+        })),
+        Action::Execute(_)
+    ));
+}
+
+#[test]
+fn ignored_file_notice_scrolls_in_narrow_panes_without_consuming_navigation() {
+    let mut app = task_app();
+    app.notice = Some("Using /a/very/long/project/path/.herdr/tasks.toml. Ignored: tasks.yaml, tasks.yml, tasks.json, tasks.json5.".into());
+    let first = draw(&mut app, 24, 8);
+    assert!(first.contains("Using"));
+    assert!(app.notice_max > 0);
+    for _ in 0..app.notice_max {
+        app.handle(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)));
+    }
+    let last = draw(&mut app, 24, 8);
+    assert!(last.contains("Alt+↑↓ Scroll notice"));
+    assert!(!app.hits.is_empty());
+    assert!(matches!(
+        app.handle(key(KeyCode::Enter)),
+        Action::Execute(_)
+    ));
+}
+
+#[test]
+fn ignored_file_notice_does_not_enable_execution_of_invalid_tasks() {
+    let mut app = task_app();
+    app.notice = Some("Using tasks.toml. Ignored: tasks.json.".into());
+    app.warning = Some("Fix tasks.toml: tasks must be an array.".into());
+    let text = draw(&mut app, 80, 20);
+    assert!(text.contains("Ignored: tasks.json."));
+    assert!(text.contains("Fix tasks.toml"));
+    assert!(app.hits.is_empty());
+    assert_eq!(app.handle(key(KeyCode::Enter)), Action::Continue);
+}

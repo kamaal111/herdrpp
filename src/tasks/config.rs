@@ -18,6 +18,7 @@ pub struct Task {
 #[derive(Debug)]
 enum Raw {
     Scalar(Value),
+    Number,
     Array(Vec<Raw>),
     Object(Vec<(String, Raw)>),
 }
@@ -28,19 +29,25 @@ impl<'de> Deserialize<'de> for Raw {
         impl<'de> Visitor<'de> for RawVisitor {
             type Value = Raw;
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a JSON value")
+                f.write_str("a task configuration value")
             }
             fn visit_bool<E>(self, v: bool) -> Result<Raw, E> {
                 Ok(Raw::Scalar(v.into()))
             }
-            fn visit_i64<E>(self, v: i64) -> Result<Raw, E> {
-                Ok(Raw::Scalar(v.into()))
+            fn visit_i64<E>(self, _: i64) -> Result<Raw, E> {
+                Ok(Raw::Number)
             }
-            fn visit_u64<E>(self, v: u64) -> Result<Raw, E> {
-                Ok(Raw::Scalar(v.into()))
+            fn visit_u64<E>(self, _: u64) -> Result<Raw, E> {
+                Ok(Raw::Number)
             }
-            fn visit_f64<E>(self, v: f64) -> Result<Raw, E> {
-                Ok(Raw::Scalar(Value::from(v)))
+            fn visit_f64<E>(self, _: f64) -> Result<Raw, E> {
+                Ok(Raw::Number)
+            }
+            fn visit_i128<E>(self, _: i128) -> Result<Raw, E> {
+                Ok(Raw::Number)
+            }
+            fn visit_u128<E>(self, _: u128) -> Result<Raw, E> {
+                Ok(Raw::Number)
             }
             fn visit_str<E>(self, v: &str) -> Result<Raw, E> {
                 Ok(Raw::Scalar(v.into()))
@@ -115,18 +122,96 @@ fn required_string(
     Some(text.to_owned())
 }
 
+fn validate_fields<'a>(
+    fields: &'a [(String, Raw)],
+    at: &str,
+    supported: &[&str],
+    errors: &mut Vec<String>,
+) -> HashMap<&'a str, &'a Raw> {
+    let mut values = HashMap::new();
+    for (key, value) in fields {
+        if values.insert(key.as_str(), value).is_some() {
+            errors.push(format!(
+                "{at}, {key}: duplicate field; keep only one {key} field."
+            ));
+        }
+        if !supported.contains(&key.as_str()) {
+            errors.push(format!(
+                "{at}, {key:?}: unknown field; remove it. Supported fields: {}.",
+                supported.join(", ")
+            ));
+        }
+    }
+    values
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Format {
+    Json5,
+    Yaml,
+    Toml,
+}
+
+pub const FILES: [(&str, Format); 5] = [
+    ("tasks.toml", Format::Toml),
+    ("tasks.yaml", Format::Yaml),
+    ("tasks.yml", Format::Yaml),
+    ("tasks.json", Format::Json5),
+    ("tasks.json5", Format::Json5),
+];
+
 pub fn parse(text: &str) -> Result<Vec<Task>, Vec<String>> {
-    let raw: Raw = serde_json::from_str(text).map_err(|error| {
-        vec![format!(
-            "Invalid JSON: {error}. Fix the JSON syntax (no comments or trailing commas)."
-        )]
-    })?;
-    let Raw::Array(entries) = raw else {
-        return Err(vec![
-            "expected a JSON array; wrap task objects in [ ... ].".into(),
-        ]);
-    };
+    parse_with_format(text, Format::Json5)
+}
+
+pub fn parse_with_format(text: &str, format: Format) -> Result<Vec<Task>, Vec<String>> {
+    let raw: Raw = match format {
+        Format::Json5 => json5::from_str(text).map_err(|error| {
+            let position = error
+                .position()
+                .unwrap_or_else(|| json5::Position::from_offset(text.len(), text));
+            format!("Invalid JSON5 at {position}: {error}. Fix the JSON5 syntax.")
+        }),
+        Format::Yaml => serde_saphyr::from_str_with_options(
+            text,
+            serde_saphyr::options! {
+                strict_booleans: true,
+                reject_unsupported_tags: true,
+            },
+        )
+        .map_err(|error| format!("Invalid YAML: {error}. Fix the YAML syntax.")),
+        Format::Toml => toml::from_str(text)
+            .map_err(|error| format!("Invalid TOML: {error}. Fix the TOML syntax.")),
+    }
+    .map_err(|error| vec![error])?;
     let mut errors = Vec::new();
+    let entries = match &raw {
+        Raw::Array(entries) => entries,
+        Raw::Object(fields) => {
+            let values =
+                validate_fields(fields, "Configuration", &["$schema", "tasks"], &mut errors);
+            if values.contains_key("$schema") {
+                required_string(
+                    values.get("$schema"),
+                    "Configuration, $schema",
+                    false,
+                    &mut errors,
+                );
+            }
+            match values.get("tasks") {
+                Some(Raw::Array(entries)) => entries,
+                _ => {
+                    errors.push("Configuration, tasks: expected an array; add tasks: [ ... ] containing task objects.".into());
+                    return Err(errors);
+                }
+            }
+        }
+        _ => {
+            return Err(vec![
+                "expected a task array or an object containing tasks: [ ... ].".into(),
+            ]);
+        }
+    };
     let mut tasks = Vec::new();
     let mut labels = HashMap::new();
     for (index, entry) in entries.iter().enumerate() {
@@ -146,17 +231,12 @@ pub fn parse(text: &str) -> Result<Vec<Task>, Vec<String>> {
             Some(label) => format!("Task {number} ({label:?})"),
             None => format!("Task {number}"),
         };
-        let mut values = HashMap::new();
-        for (key, value) in fields {
-            if values.insert(key.as_str(), value).is_some() {
-                errors.push(format!(
-                    "{at}, {key}: duplicate field; keep only one {key} field."
-                ));
-            }
-            if !matches!(key.as_str(), "label" | "command" | "args" | "new_tab") {
-                errors.push(format!("{at}, {key:?}: unknown field; remove it. Supported fields: label, command, args, new_tab."));
-            }
-        }
+        let values = validate_fields(
+            fields,
+            &at,
+            &["label", "command", "args", "new_tab"],
+            &mut errors,
+        );
         let label = required_string(
             values.get("label"),
             &format!("{at}, label"),

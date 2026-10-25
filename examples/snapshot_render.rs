@@ -11,6 +11,8 @@ fn main() -> Result<()> {
         "tiny-terminal" => (6, 1),
         "tasks-search"
         | "tasks-diagnostics"
+        | "tasks-ignored"
+        | "tasks-ignored-invalid"
         | "palette-search"
         | "palette-empty"
         | "palette-rename"
@@ -20,7 +22,7 @@ fn main() -> Result<()> {
         | "palette-branches"
         | "palette-worktree-name"
         | "palette-branch-warning" => (109, 20),
-        "palette-narrow" => (32, 12),
+        "palette-narrow" | "tasks-ignored-narrow" => (32, 12),
         _ => bail!("unknown controlled snapshot: {case}"),
     };
     let mut app = App::new(
@@ -136,11 +138,19 @@ fn main() -> Result<()> {
             },
         )?];
         palette.set_query("dev".into());
-        if case == "tasks-diagnostics" {
+        if case.starts_with("tasks-ignored") {
+            palette.notice = Some("Using /projects/api/.herdr/tasks.toml. Ignored: tasks.yaml, tasks.yml, tasks.json, tasks.json5.".into());
+        }
+        if matches!(case.as_str(), "tasks-diagnostics" | "tasks-ignored-invalid") {
             palette.items.clear();
             palette.set_query(String::new());
             palette.warning = Some("Fix /project/.herdr/tasks.json\n\nTask 1 (\"test\"), new_tab: expected true or false, received string. Remove the quotes.\n\nTask 2 (\"build\"), command: expected a nonblank string; add a quoted string value.\n\nSave the file and reopen tasks to reload.".into());
         }
+    }
+    if case == "tasks-ignored-invalid" {
+        palette.warning = palette
+            .warning
+            .map(|warning| warning.replace("tasks.json", "tasks.toml"));
     }
     if matches!(
         case.as_str(),
