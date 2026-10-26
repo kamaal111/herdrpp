@@ -149,12 +149,21 @@ class PaletteOwnerHarness:
             await_file(directory / "catalog.json")
         return directory
 
-    def select(self, directory, selection):
-        pending = directory / "pending.json"
+    def publish_selection(self, directory, selection):
+        pending = directory / "selection-pending.json"
         pending.write_text(json.dumps(selection))
         pending.replace(directory / "selection.json")
-        with pytest.raises(subprocess.TimeoutExpired):
-            self.process.communicate(timeout=0.15)
+
+    def assert_waiting_for_popup(self):
+        try:
+            stdout, stderr = self.process.communicate(timeout=0.15)
+        except subprocess.TimeoutExpired:
+            return
+        pytest.fail(f"palette exited before popup teardown: exit={self.process.returncode}, stdout={stdout!r}, stderr={stderr!r}")
+
+    def select(self, directory, selection):
+        self.publish_selection(directory, selection)
+        self.assert_waiting_for_popup()
         self.close_popup()
         stdout, stderr = self.process.communicate(timeout=8)
         self.stderr = stderr
@@ -163,6 +172,23 @@ class PaletteOwnerHarness:
 
 
 class TestPaletteOwner(PaletteOwnerHarness):
+    def test_incomplete_selection_stays_hidden_until_atomic_publication(self, monkeypatch):
+        directory = self.start()
+
+        def write_in_stages(path, contents):
+            with path.open("w") as stream:
+                stream.write("{")
+                stream.flush()
+                assert not (directory / "selection.json").exists()
+                self.assert_waiting_for_popup()
+                stream.seek(0)
+                stream.truncate()
+                stream.write(contents)
+
+        monkeypatch.setattr(Path, "write_text", write_in_stages)
+        calls = self.select(directory, {"id":"herdr:split_right", "input":None, "confirmed":False})
+        assert calls.count(["pane", "split", "--pane", "w2:p8", "--direction", "right", "--focus"]) == 1
+
     def worktree_project(self):
         project = self.root / "project"
         project.mkdir()
@@ -178,11 +204,8 @@ class TestPaletteOwner(PaletteOwnerHarness):
         return project
 
     def next_popup(self, directory, selection):
-        pending = directory / "selection-next.json"
-        pending.write_text(json.dumps(selection))
-        pending.replace(directory / "selection.json")
-        with pytest.raises(subprocess.TimeoutExpired):
-            self.process.communicate(timeout=0.15)
+        self.publish_selection(directory, selection)
+        self.assert_waiting_for_popup()
         self.close_popup()
         deadline = time.monotonic() + 8
         while (self.root / "request").read_text() == str(directory):
@@ -314,11 +337,8 @@ class TestPaletteOwner(PaletteOwnerHarness):
         (self.root / "create-error").touch()
         directory = self.start()
         chooser = self.next_popup(directory, {"id":"herdr:worktree_new", "input":None, "confirmed":False})
-        pending = chooser / "pending.json"
-        pending.write_text(json.dumps({"id":"worktree:refs/heads/feature/palette", "input":"feature/fail", "confirmed":False}))
-        pending.replace(chooser / "selection.json")
-        with pytest.raises(subprocess.TimeoutExpired):
-            self.process.communicate(timeout=0.15)
+        self.publish_selection(chooser, {"id":"worktree:refs/heads/feature/palette", "input":"feature/fail", "confirmed":False})
+        self.assert_waiting_for_popup()
         self.close_popup()
         stdout, stderr = self.process.communicate(timeout=8)
         assert self.process.returncode != 0, (stdout, stderr)
@@ -352,9 +372,7 @@ class TestPaletteOwner(PaletteOwnerHarness):
         snapshot = json.loads((self.root / "snapshot.json").read_text())
         snapshot["workspaces"][0]["worktree"]["checkout_path"] = str(self.root / "missing")
         (self.root / "snapshot.json").write_text(json.dumps(snapshot))
-        pending = chooser / "selection-next.json"
-        pending.write_text(json.dumps({"id":"worktree:refs/heads/feature/palette", "input":"feature/new", "confirmed":False}))
-        pending.replace(chooser / "selection.json")
+        self.publish_selection(chooser, {"id":"worktree:refs/heads/feature/palette", "input":"feature/new", "confirmed":False})
         self.close_popup()
         stdout, stderr = self.process.communicate(timeout=8)
         assert self.process.returncode != 0, stdout
@@ -437,9 +455,8 @@ class TestPaletteOwner(PaletteOwnerHarness):
     def test_creation_rejects_a_closed_original_target_without_socket_execution(self):
         self.env["PALETTE_TEST_TARGET_GONE"] = "1"
         directory = self.start()
-        (directory / "selection.json").write_text(json.dumps({"id":"herdr:tab_create", "input":"Review", "confirmed":False}))
-        with pytest.raises(subprocess.TimeoutExpired):
-            self.process.communicate(timeout=0.15)
+        self.publish_selection(directory, {"id":"herdr:tab_create", "input":"Review", "confirmed":False})
+        self.assert_waiting_for_popup()
         self.close_popup()
         stdout, stderr = self.process.communicate(timeout=8)
         assert self.process.returncode == 1, (stdout, stderr)
@@ -551,9 +568,8 @@ class TestPalettePullRequest(PaletteOwnerHarness):
         return self.select(directory, {"id":"herdr:view_pull_request", "input":None, "confirmed":False})
 
     def select_pr_failure(self, directory):
-        (directory / "selection.json").write_text(json.dumps({"id":"herdr:view_pull_request", "input":None, "confirmed":False}))
-        with pytest.raises(subprocess.TimeoutExpired):
-            self.process.communicate(timeout=0.15)
+        self.publish_selection(directory, {"id":"herdr:view_pull_request", "input":None, "confirmed":False})
+        self.assert_waiting_for_popup()
         self.close_popup()
         stdout, stderr = self.process.communicate(timeout=8)
         assert self.process.returncode == 1, (stdout, stderr)
@@ -667,9 +683,8 @@ class TestPaletteOpenRepo(PaletteOwnerHarness):
         return {"id":"herdr:open_repo", "input":None, "confirmed":False}
 
     def failure(self, directory):
-        (directory / "selection.json").write_text(json.dumps(self.selection()))
-        with pytest.raises(subprocess.TimeoutExpired):
-            self.process.communicate(timeout=0.15)
+        self.publish_selection(directory, self.selection())
+        self.assert_waiting_for_popup()
         assert not (self.root / (self.launcher + "-calls")).exists()
         self.close_popup()
         stdout, stderr = self.process.communicate(timeout=8)
