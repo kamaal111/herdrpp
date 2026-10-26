@@ -121,7 +121,7 @@ class TaskOwnerHarness(PaletteOwnerHarness):
         return self.requests[-1]["params"]["pane_id"]
 
     def finish_error(self, directory):
-        (directory / "selection.json").write_text(json.dumps({"id":"task:0","input":None,"confirmed":False}))
+        self.publish_selection(directory, {"id":"task:0","input":None,"confirmed":False})
         self.close_popup()
         _, stderr = self.process.communicate(timeout=12)
         assert self.process.returncode == 1
